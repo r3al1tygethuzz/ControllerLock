@@ -15,13 +15,56 @@ local LocalPlayer = Players.LocalPlayer
 local PlayerGui = LocalPlayer:WaitForChild("PlayerGui")
 
 --==============================================================
--- CLEAN UP PREVIOUS XENON
+-- DUPLICATE EXECUTION CLEANUP
 --==============================================================
 
-local OldGui = PlayerGui:FindFirstChild("Xenon")
+pcall(function()
+	if _G.XenonCleanup then
+		_G.XenonCleanup()
+	end
+end)
 
-if OldGui then
-	OldGui:Destroy()
+local CleanupConnections = {}
+
+local function TrackConnection(connection)
+	table.insert(CleanupConnections, connection)
+	return connection
+end
+
+local Destroyed = false
+
+_G.XenonCleanup = function()
+	if Destroyed then
+		return
+	end
+
+	Destroyed = true
+
+	for _, connection in ipairs(CleanupConnections) do
+		pcall(function()
+			connection:Disconnect()
+		end)
+	end
+
+	pcall(function()
+		RunService:UnbindFromRenderStep("XenonCameraLock")
+	end)
+
+	local oldGui = PlayerGui:FindFirstChild("Xenon")
+
+	if oldGui then
+		oldGui:Destroy()
+	end
+end
+
+--==============================================================
+-- REMOVE OLD GUI IF PRESENT
+--==============================================================
+
+local ExistingGui = PlayerGui:FindFirstChild("Xenon")
+
+if ExistingGui then
+	ExistingGui:Destroy()
 end
 
 pcall(function()
@@ -37,14 +80,16 @@ local Config = {
 
 	CameraMode = "Third Person",
 
-	-- Positive = below target
-	-- Negative = above target
+	-- Third-person screen-space offset.
+	--
+	-- Positive = below target.
+	-- Negative = above target.
 	AimOffset = 10,
 
-	-- 0 = instant
+	-- 0 = instant.
 	Smoothing = 0.30,
 
-	-- 0 = none
+	-- 0 = no prediction.
 	Prediction = 0.08,
 
 	MaxTargetDistance = 500,
@@ -58,7 +103,6 @@ local IsLocked = false
 local LockedTarget = nil
 
 local WaitingForButton = false
-local GuiVisible = true
 
 local Dragging = false
 local DragStart = nil
@@ -85,7 +129,7 @@ local PredictionBox
 local LockButtonDisplay
 
 --==============================================================
--- CONTROLLER HELPERS
+-- GAMEPAD DETECTION
 --==============================================================
 
 local function IsGamepad(input)
@@ -100,19 +144,57 @@ local function IsGamepad(input)
 end
 
 --==============================================================
--- SAFE BUTTON NAME
+-- SUPPORTED CONTROLLER INPUT NAMES
 --==============================================================
 
--- IMPORTANT:
--- Do NOT use things such as:
+-- These are STRING names intentionally.
+--
+-- This prevents the old:
+--
 -- Enum.KeyCode.ButtonDPadUp
 --
--- Some executor/runtime environments do not expose those
--- members and will completely stop the script.
+-- crash.
 --
--- We instead read the actual KeyCode.Name.
+-- Roblox's valid D-pad names for this version are:
+--
+-- DPadUp
+-- DPadDown
+-- DPadLeft
+-- DPadRight
+
+local SupportedButtons = {
+	ButtonA = true,
+	ButtonB = true,
+	ButtonX = true,
+	ButtonY = true,
+
+	DPadUp = true,
+	DPadDown = true,
+	DPadLeft = true,
+	DPadRight = true,
+
+	ButtonL1 = true,
+	ButtonR1 = true,
+
+	ButtonL2 = true,
+	ButtonR2 = true,
+
+	ButtonL3 = true,
+	ButtonR3 = true,
+
+	ButtonSelect = true,
+	ButtonStart = true,
+
+	Thumbstick1 = true,
+	Thumbstick2 = true,
+}
+
+--==============================================================
+-- BUTTON DISPLAY NAME
+--==============================================================
 
 local function GetButtonName(keyCode)
+
 	if not keyCode then
 		return "UNKNOWN"
 	end
@@ -125,51 +207,60 @@ local function GetButtonName(keyCode)
 		ButtonX = "X",
 		ButtonY = "Y",
 
-		ButtonL1 = "L1",
-		ButtonR1 = "R1",
-
-		ButtonL2 = "L2",
-		ButtonR2 = "R2",
-
-		ButtonL3 = "L3",
-		ButtonR3 = "R3",
-
-		ButtonStart = "START",
-		ButtonSelect = "SELECT",
-
 		DPadUp = "D-PAD UP",
 		DPadDown = "D-PAD DOWN",
 		DPadLeft = "D-PAD LEFT",
 		DPadRight = "D-PAD RIGHT",
 
-		ButtonDPadUp = "D-PAD UP",
-		ButtonDPadDown = "D-PAD DOWN",
-		ButtonDPadLeft = "D-PAD LEFT",
-		ButtonDPadRight = "D-PAD RIGHT",
+		ButtonL1 = "L1 / LB",
+		ButtonR1 = "R1 / RB",
+
+		ButtonL2 = "L2 / LT",
+		ButtonR2 = "R2 / RT",
+
+		ButtonL3 = "L3",
+		ButtonR3 = "R3",
+
+		ButtonSelect = "SELECT / VIEW",
+		ButtonStart = "START / MENU",
+
+		Thumbstick1 = "LEFT STICK",
+		Thumbstick2 = "RIGHT STICK",
 	}
 
 	return names[name] or name
 end
 
 --==============================================================
--- NUMBER HELPERS
+-- NUMBER PARSER
 --==============================================================
 
-local function ReadNumber(text, defaultValue, minimum, maximum)
-	local number = tonumber(text)
+local function ReadNumber(
+	text,
+	defaultValue,
+	minimum,
+	maximum
+)
 
-	if number == nil then
+	local value = tonumber(text)
+
+	if value == nil then
 		return defaultValue
 	end
 
-	return math.clamp(number, minimum, maximum)
+	return math.clamp(
+		value,
+		minimum,
+		maximum
+	)
 end
 
 --==============================================================
--- TARGET VALIDATION
+-- TARGET CHARACTER
 --==============================================================
 
 local function GetTargetParts(player)
+
 	if not player then
 		return nil
 	end
@@ -184,8 +275,11 @@ local function GetTargetParts(player)
 		return nil
 	end
 
-	local humanoid = character:FindFirstChildOfClass("Humanoid")
-	local root = character:FindFirstChild("HumanoidRootPart")
+	local humanoid =
+		character:FindFirstChildOfClass("Humanoid")
+
+	local root =
+		character:FindFirstChild("HumanoidRootPart")
 
 	if not humanoid or not root then
 		return nil
@@ -198,21 +292,30 @@ local function GetTargetParts(player)
 	return character, humanoid, root
 end
 
+--==============================================================
+-- TARGET VALIDATION
+--==============================================================
+
 local function IsValidTarget(player)
-	local character, humanoid, root = GetTargetParts(player)
+
+	local character, humanoid, root =
+		GetTargetParts(player)
 
 	if not character then
 		return false
 	end
 
-	local localCharacter = LocalPlayer.Character
+	local localCharacter =
+		LocalPlayer.Character
 
 	if not localCharacter then
 		return false
 	end
 
 	local localRoot =
-		localCharacter:FindFirstChild("HumanoidRootPart")
+		localCharacter:FindFirstChild(
+			"HumanoidRootPart"
+		)
 
 	if not localRoot then
 		return false
@@ -221,7 +324,9 @@ local function IsValidTarget(player)
 	local distance =
 		(root.Position - localRoot.Position).Magnitude
 
-	if distance > Config.MaxTargetDistance then
+	if distance >
+		Config.MaxTargetDistance then
+
 		return false
 	end
 
@@ -233,17 +338,29 @@ end
 --==============================================================
 
 local function FindClosestTarget()
+
+	local Camera =
+		workspace.CurrentCamera
+
+	if not Camera then
+		return nil
+	end
+
 	local closestTarget = nil
 	local closestDistance = math.huge
 
-	local viewportSize = workspace.CurrentCamera.ViewportSize
+	local viewport =
+		Camera.ViewportSize
 
-	local center = Vector2.new(
-		viewportSize.X / 2,
-		viewportSize.Y / 2
-	)
+	local center =
+		Vector2.new(
+			viewport.X / 2,
+			viewport.Y / 2
+		)
 
-	for _, player in ipairs(Players:GetPlayers()) do
+	for _, player in ipairs(
+		Players:GetPlayers()
+	) do
 
 		if player ~= LocalPlayer then
 
@@ -253,22 +370,26 @@ local function FindClosestTarget()
 			if character and humanoid and root then
 
 				local screenPosition, onScreen =
-					workspace.CurrentCamera:WorldToViewportPoint(
+					Camera:WorldToViewportPoint(
 						root.Position
 					)
 
-				if onScreen and screenPosition.Z > 0 then
+				if onScreen
+					and screenPosition.Z > 0 then
 
-					local screenPoint = Vector2.new(
-						screenPosition.X,
-						screenPosition.Y
-					)
+					local screenPoint =
+						Vector2.new(
+							screenPosition.X,
+							screenPosition.Y
+						)
 
-					local distanceFromCenter =
+					local distance =
 						(screenPoint - center).Magnitude
 
-					if distanceFromCenter < closestDistance then
-						closestDistance = distanceFromCenter
+					if distance <
+						closestDistance then
+
+						closestDistance = distance
 						closestTarget = player
 					end
 				end
@@ -280,7 +401,7 @@ local function FindClosestTarget()
 end
 
 --==============================================================
--- UI STATUS
+-- STATUS
 --==============================================================
 
 local function UpdateStatus()
@@ -292,30 +413,48 @@ local function UpdateStatus()
 	if IsLocked and LockedTarget then
 
 		StatusText.Text = "LOCKED"
+
 		StatusText.TextColor3 =
-			Color3.fromRGB(240, 55, 65)
+			Color3.fromRGB(
+				240,
+				55,
+				65
+			)
 
 	else
 
 		StatusText.Text = "READY"
+
 		StatusText.TextColor3 =
-			Color3.fromRGB(210, 210, 210)
+			Color3.fromRGB(
+				210,
+				210,
+				210
+			)
 	end
 
 	if TargetText then
 
-		if IsLocked and LockedTarget then
+		if IsLocked
+			and LockedTarget then
+
 			TargetText.Text =
-				"TARGET  /  " ..
+				"TARGET / " ..
 				LockedTarget.DisplayName
+
 		else
+
 			TargetText.Text =
-				"TARGET  /  NONE"
+				"TARGET / NONE"
 		end
 	end
 end
 
-local function UpdateLockButtonText()
+--==============================================================
+-- LOCK BUTTON DISPLAY
+--==============================================================
+
+local function UpdateLockButtonDisplay()
 
 	if not LockButtonDisplay then
 		return
@@ -323,7 +462,9 @@ local function UpdateLockButtonText()
 
 	LockButtonDisplay.Text =
 		"SET LOCK BUTTON     [" ..
-		GetButtonName(Config.LockButton) ..
+		GetButtonName(
+			Config.LockButton
+		) ..
 		"]"
 end
 
@@ -349,10 +490,13 @@ local function Lock()
 		return
 	end
 
-	local target = FindClosestTarget()
+	local target =
+		FindClosestTarget()
 
 	if not target then
+
 		UpdateStatus()
+
 		return
 	end
 
@@ -376,13 +520,17 @@ local function ToggleLock()
 end
 
 --==============================================================
--- CREATE GUI
+-- CREATE SCREEN GUI
 --==============================================================
 
 ScreenGui = Instance.new("ScreenGui")
+
 ScreenGui.Name = "Xenon"
+
 ScreenGui.ResetOnSpawn = false
+
 ScreenGui.IgnoreGuiInset = true
+
 ScreenGui.ZIndexBehavior =
 	Enum.ZIndexBehavior.Sibling
 
@@ -393,33 +541,66 @@ ScreenGui.Parent = PlayerGui
 --==============================================================
 
 MainFrame = Instance.new("Frame")
+
 MainFrame.Name = "Main"
+
 MainFrame.AnchorPoint =
-	Vector2.new(0.5, 0.5)
+	Vector2.new(
+		0.5,
+		0.5
+	)
 
 MainFrame.Position =
-	UDim2.fromScale(0.5, 0.5)
+	UDim2.fromScale(
+		0.5,
+		0.5
+	)
 
 MainFrame.Size =
-	UDim2.fromOffset(390, 540)
+	UDim2.fromOffset(
+		390,
+		540
+	)
 
 MainFrame.BackgroundColor3 =
-	Color3.fromRGB(17, 17, 19)
+	Color3.fromRGB(
+		17,
+		17,
+		19
+	)
 
 MainFrame.BorderSizePixel = 0
+
 MainFrame.Parent = ScreenGui
 
-local MainCorner = Instance.new("UICorner")
-MainCorner.CornerRadius =
-	UDim.new(0, 14)
-MainCorner.Parent = MainFrame
+local MainCorner =
+	Instance.new("UICorner")
 
-local MainStroke = Instance.new("UIStroke")
+MainCorner.CornerRadius =
+	UDim.new(
+		0,
+		14
+	)
+
+MainCorner.Parent =
+	MainFrame
+
+local MainStroke =
+	Instance.new("UIStroke")
+
 MainStroke.Color =
-	Color3.fromRGB(65, 65, 70)
+	Color3.fromRGB(
+		65,
+		65,
+		70
+	)
+
 MainStroke.Thickness = 1
+
 MainStroke.Transparency = 0.25
-MainStroke.Parent = MainFrame
+
+MainStroke.Parent =
+	MainFrame
 
 --==============================================================
 -- RESPONSIVE SIZE
@@ -427,82 +608,140 @@ MainStroke.Parent = MainFrame
 
 local function UpdateSize()
 
+	local camera =
+		workspace.CurrentCamera
+
+	if not camera then
+		return
+	end
+
 	local viewport =
-		workspace.CurrentCamera.ViewportSize
+		camera.ViewportSize
 
 	if viewport.X <= 600 then
 
 		MainFrame.Size =
-			UDim2.fromOffset(300, 500)
+			UDim2.fromOffset(
+				300,
+				500
+			)
 
 	elseif viewport.X <= 1000 then
 
 		MainFrame.Size =
-			UDim2.fromOffset(350, 525)
+			UDim2.fromOffset(
+				350,
+				525
+			)
 
 	else
 
 		MainFrame.Size =
-			UDim2.fromOffset(390, 540)
+			UDim2.fromOffset(
+				390,
+				540
+			)
 	end
 end
 
 UpdateSize()
 
-workspace.CurrentCamera
-	:GetPropertyChangedSignal("ViewportSize")
-	:Connect(UpdateSize)
+TrackConnection(
+	workspace.CurrentCamera
+		:GetPropertyChangedSignal(
+			"ViewportSize"
+		)
+		:Connect(UpdateSize)
+)
 
 --==============================================================
 -- TOP BAR
 --==============================================================
 
-local TopBar = Instance.new("Frame")
-TopBar.Name = "TopBar"
+local TopBar =
+	Instance.new("Frame")
+
+TopBar.Name =
+	"TopBar"
 
 TopBar.Size =
-	UDim2.new(1, 0, 0, 76)
+	UDim2.new(
+		1,
+		0,
+		0,
+		76
+	)
 
 TopBar.BackgroundTransparency = 1
-TopBar.Parent = MainFrame
+
+TopBar.Parent =
+	MainFrame
 
 --==============================================================
--- RED LINE
+-- TOP RED LINE
 --==============================================================
 
-local RedLine = Instance.new("Frame")
+local RedLine =
+	Instance.new("Frame")
 
 RedLine.Position =
-	UDim2.fromOffset(15, 0)
+	UDim2.fromOffset(
+		15,
+		0
+	)
 
 RedLine.Size =
-	UDim2.new(1, -30, 0, 2)
+	UDim2.new(
+		1,
+		-30,
+		0,
+		2
+	)
 
 RedLine.BackgroundColor3 =
-	Color3.fromRGB(235, 45, 55)
+	Color3.fromRGB(
+		235,
+		45,
+		55
+	)
 
 RedLine.BorderSizePixel = 0
-RedLine.Parent = TopBar
 
-local RedCorner = Instance.new("UICorner")
+RedLine.Parent =
+	TopBar
+
+local RedCorner =
+	Instance.new("UICorner")
+
 RedCorner.CornerRadius =
-	UDim.new(1, 0)
+	UDim.new(
+		1,
+		0
+	)
 
-RedCorner.Parent = RedLine
+RedCorner.Parent =
+	RedLine
 
 --==============================================================
--- LOGO
+-- X LOGO
 --==============================================================
 
-local Logo = Instance.new("TextLabel")
+local Logo =
+	Instance.new("TextLabel")
 
 Logo.BackgroundTransparency = 1
 
 Logo.Position =
-	UDim2.fromOffset(18, 14)
+	UDim2.fromOffset(
+		18,
+		14
+	)
 
 Logo.Size =
-	UDim2.fromOffset(35, 38)
+	UDim2.fromOffset(
+		35,
+		38
+	)
 
 Logo.Font =
 	Enum.Font.GothamBlack
@@ -512,23 +751,37 @@ Logo.Text = "X"
 Logo.TextSize = 30
 
 Logo.TextColor3 =
-	Color3.fromRGB(235, 45, 55)
+	Color3.fromRGB(
+		235,
+		45,
+		55
+	)
 
-Logo.Parent = TopBar
+Logo.Parent =
+	TopBar
 
 --==============================================================
 -- TITLE
 --==============================================================
 
-local Title = Instance.new("TextLabel")
+local Title =
+	Instance.new("TextLabel")
 
 Title.BackgroundTransparency = 1
 
 Title.Position =
-	UDim2.fromOffset(57, 12)
+	UDim2.fromOffset(
+		57,
+		12
+	)
 
 Title.Size =
-	UDim2.new(1, -120, 0, 25)
+	UDim2.new(
+		1,
+		-120,
+		0,
+		25
+	)
 
 Title.Font =
 	Enum.Font.GothamBold
@@ -541,23 +794,37 @@ Title.TextXAlignment =
 	Enum.TextXAlignment.Left
 
 Title.TextColor3 =
-	Color3.fromRGB(245, 245, 245)
+	Color3.fromRGB(
+		245,
+		245,
+		245
+	)
 
-Title.Parent = TopBar
+Title.Parent =
+	TopBar
 
 --==============================================================
 -- SUBTITLE
 --==============================================================
 
-local Subtitle = Instance.new("TextLabel")
+local Subtitle =
+	Instance.new("TextLabel")
 
 Subtitle.BackgroundTransparency = 1
 
 Subtitle.Position =
-	UDim2.fromOffset(58, 38)
+	UDim2.fromOffset(
+		58,
+		38
+	)
 
 Subtitle.Size =
-	UDim2.new(1, -125, 0, 18)
+	UDim2.new(
+		1,
+		-125,
+		0,
+		18
+	)
 
 Subtitle.Font =
 	Enum.Font.GothamMedium
@@ -571,29 +838,51 @@ Subtitle.TextXAlignment =
 	Enum.TextXAlignment.Left
 
 Subtitle.TextColor3 =
-	Color3.fromRGB(120, 120, 125)
+	Color3.fromRGB(
+		120,
+		120,
+		125
+	)
 
-Subtitle.Parent = TopBar
+Subtitle.Parent =
+	TopBar
 
 --==============================================================
 -- CLOSE BUTTON
 --==============================================================
 
-local CloseButton = Instance.new("TextButton")
+local CloseButton =
+	Instance.new("TextButton")
 
-CloseButton.Name = "Close"
+CloseButton.Name =
+	"Close"
 
 CloseButton.AnchorPoint =
-	Vector2.new(1, 0)
+	Vector2.new(
+		1,
+		0
+	)
 
 CloseButton.Position =
-	UDim2.new(1, -15, 0, 15)
+	UDim2.new(
+		1,
+		-15,
+		0,
+		15
+	)
 
 CloseButton.Size =
-	UDim2.fromOffset(40, 40)
+	UDim2.fromOffset(
+		40,
+		40
+	)
 
 CloseButton.BackgroundColor3 =
-	Color3.fromRGB(35, 35, 38)
+	Color3.fromRGB(
+		35,
+		35,
+		38
+	)
 
 CloseButton.BorderSizePixel = 0
 
@@ -605,43 +894,50 @@ CloseButton.Font =
 	Enum.Font.GothamBold
 
 CloseButton.TextColor3 =
-	Color3.fromRGB(230, 230, 230)
+	Color3.fromRGB(
+		230,
+		230,
+		230
+	)
 
-CloseButton.Parent = TopBar
+CloseButton.Parent =
+	TopBar
 
-local CloseCorner = Instance.new("UICorner")
+local CloseCorner =
+	Instance.new("UICorner")
+
 CloseCorner.CornerRadius =
-	UDim.new(0, 9)
+	UDim.new(
+		0,
+		9
+	)
 
-CloseCorner.Parent = CloseButton
-
-CloseButton.MouseEnter:Connect(function()
-
-	CloseButton.BackgroundColor3 =
-		Color3.fromRGB(180, 35, 45)
-
-end)
-
-CloseButton.MouseLeave:Connect(function()
-
-	CloseButton.BackgroundColor3 =
-		Color3.fromRGB(35, 35, 38)
-
-end)
+CloseCorner.Parent =
+	CloseButton
 
 --==============================================================
 -- CONTENT
 --==============================================================
 
-local Scroll = Instance.new("ScrollingFrame")
+local Scroll =
+	Instance.new("ScrollingFrame")
 
-Scroll.Name = "Content"
+Scroll.Name =
+	"Content"
 
 Scroll.Position =
-	UDim2.fromOffset(12, 78)
+	UDim2.fromOffset(
+		12,
+		78
+	)
 
 Scroll.Size =
-	UDim2.new(1, -24, 1, -90)
+	UDim2.new(
+		1,
+		-24,
+		1,
+		-90
+	)
 
 Scroll.BackgroundTransparency = 1
 
@@ -650,17 +946,31 @@ Scroll.BorderSizePixel = 0
 Scroll.ScrollBarThickness = 3
 
 Scroll.ScrollBarImageColor3 =
-	Color3.fromRGB(85, 85, 90)
+	Color3.fromRGB(
+		85,
+		85,
+		90
+	)
 
 Scroll.CanvasSize =
-	UDim2.new(0, 0, 0, 760)
+	UDim2.new(
+		0,
+		0,
+		0,
+		760
+	)
 
-Scroll.Parent = MainFrame
+Scroll.Parent =
+	MainFrame
 
-local Layout = Instance.new("UIListLayout")
+local Layout =
+	Instance.new("UIListLayout")
 
 Layout.Padding =
-	UDim.new(0, 9)
+	UDim.new(
+		0,
+		9
+	)
 
 Layout.HorizontalAlignment =
 	Enum.HorizontalAlignment.Center
@@ -668,18 +978,28 @@ Layout.HorizontalAlignment =
 Layout.SortOrder =
 	Enum.SortOrder.LayoutOrder
 
-Layout.Parent = Scroll
+Layout.Parent =
+	Scroll
 
 --==============================================================
--- SECTION LABEL
+-- SECTION CREATOR
 --==============================================================
 
-local function CreateSection(text, order)
+local function CreateSection(
+	text,
+	order
+)
 
-	local label = Instance.new("TextLabel")
+	local label =
+		Instance.new("TextLabel")
 
 	label.Size =
-		UDim2.new(1, -10, 0, 20)
+		UDim2.new(
+			1,
+			-10,
+			0,
+			20
+		)
 
 	label.BackgroundTransparency = 1
 
@@ -694,11 +1014,17 @@ local function CreateSection(text, order)
 		Enum.TextXAlignment.Left
 
 	label.TextColor3 =
-		Color3.fromRGB(115, 115, 120)
+		Color3.fromRGB(
+			115,
+			115,
+			120
+		)
 
-	label.LayoutOrder = order
+	label.LayoutOrder =
+		order
 
-	label.Parent = Scroll
+	label.Parent =
+		Scroll
 
 	return label
 end
@@ -707,36 +1033,61 @@ end
 -- STATUS CARD
 --==============================================================
 
-local StatusCard = Instance.new("Frame")
+local StatusCard =
+	Instance.new("Frame")
 
 StatusCard.Size =
-	UDim2.new(1, -10, 0, 66)
+	UDim2.new(
+		1,
+		-10,
+		0,
+		66
+	)
 
 StatusCard.BackgroundColor3 =
-	Color3.fromRGB(24, 24, 27)
+	Color3.fromRGB(
+		24,
+		24,
+		27
+	)
 
 StatusCard.BorderSizePixel = 0
 
 StatusCard.LayoutOrder = 1
 
-StatusCard.Parent = Scroll
+StatusCard.Parent =
+	Scroll
 
-local StatusCorner = Instance.new("UICorner")
+local StatusCorner =
+	Instance.new("UICorner")
 
 StatusCorner.CornerRadius =
-	UDim.new(0, 10)
+	UDim.new(
+		0,
+		10
+	)
 
-StatusCorner.Parent = StatusCard
+StatusCorner.Parent =
+	StatusCard
 
-local StatusLabel = Instance.new("TextLabel")
+local StatusLabel =
+	Instance.new("TextLabel")
 
 StatusLabel.BackgroundTransparency = 1
 
 StatusLabel.Position =
-	UDim2.fromOffset(14, 8)
+	UDim2.fromOffset(
+		14,
+		8
+	)
 
 StatusLabel.Size =
-	UDim2.new(0.5, 0, 0, 16)
+	UDim2.new(
+		0.5,
+		0,
+		0,
+		16
+	)
 
 StatusLabel.Font =
 	Enum.Font.GothamMedium
@@ -750,24 +1101,39 @@ StatusLabel.TextXAlignment =
 	Enum.TextXAlignment.Left
 
 StatusLabel.TextColor3 =
-	Color3.fromRGB(110, 110, 115)
+	Color3.fromRGB(
+		110,
+		110,
+		115
+	)
 
-StatusLabel.Parent = StatusCard
+StatusLabel.Parent =
+	StatusCard
 
-StatusText = Instance.new("TextLabel")
+StatusText =
+	Instance.new("TextLabel")
 
 StatusText.BackgroundTransparency = 1
 
 StatusText.Position =
-	UDim2.fromOffset(14, 28)
+	UDim2.fromOffset(
+		14,
+		28
+	)
 
 StatusText.Size =
-	UDim2.new(0.5, 0, 0, 24)
+	UDim2.new(
+		0.5,
+		0,
+		0,
+		24
+	)
 
 StatusText.Font =
 	Enum.Font.GothamBold
 
-StatusText.Text = "READY"
+StatusText.Text =
+	"READY"
 
 StatusText.TextSize = 15
 
@@ -775,22 +1141,41 @@ StatusText.TextXAlignment =
 	Enum.TextXAlignment.Left
 
 StatusText.TextColor3 =
-	Color3.fromRGB(210, 210, 210)
+	Color3.fromRGB(
+		210,
+		210,
+		210
+	)
 
-StatusText.Parent = StatusCard
+StatusText.Parent =
+	StatusCard
 
-TargetText = Instance.new("TextLabel")
+TargetText =
+	Instance.new("TextLabel")
 
 TargetText.BackgroundTransparency = 1
 
 TargetText.AnchorPoint =
-	Vector2.new(1, 0)
+	Vector2.new(
+		1,
+		0
+	)
 
 TargetText.Position =
-	UDim2.new(1, -14, 0, 28)
+	UDim2.new(
+		1,
+		-14,
+		0,
+		28
+	)
 
 TargetText.Size =
-	UDim2.new(0.45, 0, 0, 20)
+	UDim2.new(
+		0.45,
+		0,
+		0,
+		20
+	)
 
 TargetText.Font =
 	Enum.Font.GothamMedium
@@ -804,23 +1189,41 @@ TargetText.TextXAlignment =
 	Enum.TextXAlignment.Right
 
 TargetText.TextColor3 =
-	Color3.fromRGB(130, 130, 135)
+	Color3.fromRGB(
+		130,
+		130,
+		135
+	)
 
-TargetText.Parent = StatusCard
+TargetText.Parent =
+	StatusCard
 
 --==============================================================
 -- CAMERA MODE
 --==============================================================
 
-CreateSection("CAMERA MODE", 2)
+CreateSection(
+	"CAMERA MODE",
+	2
+)
 
-ModeButton = Instance.new("TextButton")
+ModeButton =
+	Instance.new("TextButton")
 
 ModeButton.Size =
-	UDim2.new(1, -10, 0, 46)
+	UDim2.new(
+		1,
+		-10,
+		0,
+		46
+	)
 
 ModeButton.BackgroundColor3 =
-	Color3.fromRGB(24, 24, 27)
+	Color3.fromRGB(
+		24,
+		24,
+		27
+	)
 
 ModeButton.BorderSizePixel = 0
 
@@ -836,37 +1239,62 @@ ModeButton.TextXAlignment =
 	Enum.TextXAlignment.Left
 
 ModeButton.TextColor3 =
-	Color3.fromRGB(230, 230, 230)
+	Color3.fromRGB(
+		230,
+		230,
+		230
+	)
 
 ModeButton.LayoutOrder = 3
 
-ModeButton.Parent = Scroll
+ModeButton.Parent =
+	Scroll
 
-local ModePadding = Instance.new("UIPadding")
+local ModePadding =
+	Instance.new("UIPadding")
 
 ModePadding.PaddingLeft =
-	UDim.new(0, 14)
+	UDim.new(
+		0,
+		14
+	)
 
-ModePadding.Parent = ModeButton
+ModePadding.Parent =
+	ModeButton
 
-local ModeCorner = Instance.new("UICorner")
+local ModeCorner =
+	Instance.new("UICorner")
 
 ModeCorner.CornerRadius =
-	UDim.new(0, 9)
+	UDim.new(
+		0,
+		9
+	)
 
-ModeCorner.Parent = ModeButton
+ModeCorner.Parent =
+	ModeButton
 
 --==============================================================
 -- DROPDOWN
 --==============================================================
 
-Dropdown = Instance.new("Frame")
+Dropdown =
+	Instance.new("Frame")
 
 Dropdown.Size =
-	UDim2.new(1, -10, 0, 88)
+	UDim2.new(
+		1,
+		-10,
+		0,
+		88
+	)
 
 Dropdown.BackgroundColor3 =
-	Color3.fromRGB(21, 21, 24)
+	Color3.fromRGB(
+		21,
+		21,
+		24
+	)
 
 Dropdown.BorderSizePixel = 0
 
@@ -874,25 +1302,44 @@ Dropdown.Visible = false
 
 Dropdown.LayoutOrder = 4
 
-Dropdown.Parent = Scroll
+Dropdown.Parent =
+	Scroll
 
-local DropdownCorner = Instance.new("UICorner")
+local DropdownCorner =
+	Instance.new("UICorner")
 
 DropdownCorner.CornerRadius =
-	UDim.new(0, 9)
+	UDim.new(
+		0,
+		9
+	)
 
-DropdownCorner.Parent = Dropdown
+DropdownCorner.Parent =
+	Dropdown
 
-local FirstPersonButton = Instance.new("TextButton")
+local FirstPersonButton =
+	Instance.new("TextButton")
 
 FirstPersonButton.Position =
-	UDim2.fromOffset(4, 4)
+	UDim2.fromOffset(
+		4,
+		4
+	)
 
 FirstPersonButton.Size =
-	UDim2.new(1, -8, 0, 38)
+	UDim2.new(
+		1,
+		-8,
+		0,
+		38
+	)
 
 FirstPersonButton.BackgroundColor3 =
-	Color3.fromRGB(30, 30, 33)
+	Color3.fromRGB(
+		30,
+		30,
+		33
+	)
 
 FirstPersonButton.BorderSizePixel = 0
 
@@ -905,27 +1352,50 @@ FirstPersonButton.Text =
 FirstPersonButton.TextSize = 10
 
 FirstPersonButton.TextColor3 =
-	Color3.fromRGB(220, 220, 220)
+	Color3.fromRGB(
+		220,
+		220,
+		220
+	)
 
-FirstPersonButton.Parent = Dropdown
+FirstPersonButton.Parent =
+	Dropdown
 
-local FPcorner = Instance.new("UICorner")
+local FPcorner =
+	Instance.new("UICorner")
 
 FPcorner.CornerRadius =
-	UDim.new(0, 7)
+	UDim.new(
+		0,
+		7
+	)
 
-FPcorner.Parent = FirstPersonButton
+FPcorner.Parent =
+	FirstPersonButton
 
-local ThirdPersonButton = Instance.new("TextButton")
+local ThirdPersonButton =
+	Instance.new("TextButton")
 
 ThirdPersonButton.Position =
-	UDim2.fromOffset(4, 46)
+	UDim2.fromOffset(
+		4,
+		46
+	)
 
 ThirdPersonButton.Size =
-	UDim2.new(1, -8, 0, 38)
+	UDim2.new(
+		1,
+		-8,
+		0,
+		38
+	)
 
 ThirdPersonButton.BackgroundColor3 =
-	Color3.fromRGB(30, 30, 33)
+	Color3.fromRGB(
+		30,
+		30,
+		33
+	)
 
 ThirdPersonButton.BorderSizePixel = 0
 
@@ -938,19 +1408,29 @@ ThirdPersonButton.Text =
 ThirdPersonButton.TextSize = 10
 
 ThirdPersonButton.TextColor3 =
-	Color3.fromRGB(220, 220, 220)
+	Color3.fromRGB(
+		220,
+		220,
+		220
+	)
 
-ThirdPersonButton.Parent = Dropdown
+ThirdPersonButton.Parent =
+	Dropdown
 
-local TPcorner = Instance.new("UICorner")
+local TPcorner =
+	Instance.new("UICorner")
 
 TPcorner.CornerRadius =
-	UDim.new(0, 7)
+	UDim.new(
+		0,
+		7
+	)
 
-TPcorner.Parent = ThirdPersonButton
+TPcorner.Parent =
+	ThirdPersonButton
 
 --==============================================================
--- INPUT CREATOR
+-- INPUT FIELD
 --==============================================================
 
 local function CreateInput(
@@ -959,36 +1439,62 @@ local function CreateInput(
 	order
 )
 
-	local container = Instance.new("Frame")
+	local container =
+		Instance.new("Frame")
 
 	container.Size =
-		UDim2.new(1, -10, 0, 68)
+		UDim2.new(
+			1,
+			-10,
+			0,
+			68
+		)
 
 	container.BackgroundColor3 =
-		Color3.fromRGB(24, 24, 27)
+		Color3.fromRGB(
+			24,
+			24,
+			27
+		)
 
 	container.BorderSizePixel = 0
 
-	container.LayoutOrder = order
+	container.LayoutOrder =
+		order
 
-	container.Parent = Scroll
+	container.Parent =
+		Scroll
 
-	local corner = Instance.new("UICorner")
+	local corner =
+		Instance.new("UICorner")
 
 	corner.CornerRadius =
-		UDim.new(0, 9)
+		UDim.new(
+			0,
+			9
+		)
 
-	corner.Parent = container
+	corner.Parent =
+		container
 
-	local label = Instance.new("TextLabel")
+	local label =
+		Instance.new("TextLabel")
 
 	label.BackgroundTransparency = 1
 
 	label.Position =
-		UDim2.fromOffset(13, 7)
+		UDim2.fromOffset(
+			13,
+			7
+		)
 
 	label.Size =
-		UDim2.new(1, -26, 0, 18)
+		UDim2.new(
+			1,
+			-26,
+			0,
+			18
+		)
 
 	label.Font =
 		Enum.Font.GothamMedium
@@ -1002,20 +1508,38 @@ local function CreateInput(
 		Enum.TextXAlignment.Left
 
 	label.TextColor3 =
-		Color3.fromRGB(145, 145, 150)
+		Color3.fromRGB(
+			145,
+			145,
+			150
+		)
 
-	label.Parent = container
+	label.Parent =
+		container
 
-	local box = Instance.new("TextBox")
+	local box =
+		Instance.new("TextBox")
 
 	box.Position =
-		UDim2.fromOffset(12, 31)
+		UDim2.fromOffset(
+			12,
+			31
+		)
 
 	box.Size =
-		UDim2.new(1, -24, 0, 27)
+		UDim2.new(
+			1,
+			-24,
+			0,
+			27
+		)
 
 	box.BackgroundColor3 =
-		Color3.fromRGB(16, 16, 18)
+		Color3.fromRGB(
+			16,
+			16,
+			18
+		)
 
 	box.BorderSizePixel = 0
 
@@ -1030,58 +1554,86 @@ local function CreateInput(
 	box.TextSize = 10
 
 	box.TextColor3 =
-		Color3.fromRGB(235, 235, 235)
+		Color3.fromRGB(
+			235,
+			235,
+			235
+		)
 
-	box.Parent = container
+	box.Parent =
+		container
 
-	local boxCorner = Instance.new("UICorner")
+	local boxCorner =
+		Instance.new("UICorner")
 
 	boxCorner.CornerRadius =
-		UDim.new(0, 7)
+		UDim.new(
+			0,
+			7
+		)
 
-	boxCorner.Parent = box
+	boxCorner.Parent =
+		box
 
 	return box
 end
 
 --==============================================================
--- SETTINGS
+-- AIM SETTINGS
 --==============================================================
 
-CreateSection("AIM SETTINGS", 5)
-
-OffsetBox = CreateInput(
-	"THIRD PERSON SCREEN OFFSET",
-	tostring(Config.AimOffset),
-	6
+CreateSection(
+	"AIM SETTINGS",
+	5
 )
 
-OffsetBox.FocusLost:Connect(function()
+OffsetBox =
+	CreateInput(
+		"THIRD PERSON SCREEN OFFSET",
+		tostring(Config.AimOffset),
+		6
+	)
 
-	Config.AimOffset =
-		ReadNumber(
-			OffsetBox.Text,
-			10,
-			-500,
-			500
-		)
+TrackConnection(
+	OffsetBox.FocusLost:Connect(function()
 
-	OffsetBox.Text =
-		tostring(Config.AimOffset)
+		Config.AimOffset =
+			ReadNumber(
+				OffsetBox.Text,
+				10,
+				-500,
+				500
+			)
 
-end)
+		OffsetBox.Text =
+			tostring(
+				Config.AimOffset
+			)
+
+	end)
+)
 
 --==============================================================
 -- RECOMMENDATION
 --==============================================================
 
-local Recommendation = Instance.new("TextLabel")
+local Recommendation =
+	Instance.new("TextLabel")
 
 Recommendation.Size =
-	UDim2.new(1, -10, 0, 44)
+	UDim2.new(
+		1,
+		-10,
+		0,
+		44
+	)
 
 Recommendation.BackgroundColor3 =
-	Color3.fromRGB(24, 24, 27)
+	Color3.fromRGB(
+		24,
+		24,
+		27
+	)
 
 Recommendation.BorderSizePixel = 0
 
@@ -1089,7 +1641,8 @@ Recommendation.Font =
 	Enum.Font.GothamMedium
 
 Recommendation.Text =
-	"HEAD  ≈  FIRST PERSON\nTORSO  ≈  THIRD PERSON"
+	"HEAD  ≈  FIRST PERSON\n" ..
+	"TORSO  ≈  THIRD PERSON"
 
 Recommendation.TextSize = 9
 
@@ -1100,95 +1653,129 @@ Recommendation.TextYAlignment =
 	Enum.TextYAlignment.Center
 
 Recommendation.TextColor3 =
-	Color3.fromRGB(150, 150, 155)
+	Color3.fromRGB(
+		150,
+		150,
+		155
+	)
 
 Recommendation.LayoutOrder = 7
 
-Recommendation.Parent = Scroll
+Recommendation.Parent =
+	Scroll
 
-local RecCorner = Instance.new("UICorner")
+local RecCorner =
+	Instance.new("UICorner")
 
 RecCorner.CornerRadius =
-	UDim.new(0, 9)
+	UDim.new(
+		0,
+		9
+	)
 
-RecCorner.Parent = Recommendation
+RecCorner.Parent =
+	Recommendation
 
-local RecPadding = Instance.new("UIPadding")
+local RecPadding =
+	Instance.new("UIPadding")
 
 RecPadding.PaddingLeft =
-	UDim.new(0, 13)
+	UDim.new(
+		0,
+		13
+	)
 
-RecPadding.Parent = Recommendation
+RecPadding.Parent =
+	Recommendation
 
 --==============================================================
 -- SMOOTHING
 --==============================================================
 
-SmoothingBox = CreateInput(
-	"SMOOTHING",
-	"0.30",
-	8
+SmoothingBox =
+	CreateInput(
+		"SMOOTHING",
+		"0.30",
+		8
+	)
+
+TrackConnection(
+	SmoothingBox.FocusLost:Connect(function()
+
+		Config.Smoothing =
+			ReadNumber(
+				SmoothingBox.Text,
+				0.30,
+				0,
+				10
+			)
+
+		SmoothingBox.Text =
+			string.format(
+				"%.2f",
+				Config.Smoothing
+			)
+
+	end)
 )
-
-SmoothingBox.FocusLost:Connect(function()
-
-	Config.Smoothing =
-		ReadNumber(
-			SmoothingBox.Text,
-			0.30,
-			0,
-			10
-		)
-
-	SmoothingBox.Text =
-		string.format(
-			"%.2f",
-			Config.Smoothing
-		)
-
-end)
 
 --==============================================================
 -- PREDICTION
 --==============================================================
 
-PredictionBox = CreateInput(
-	"PREDICTION",
-	"0.08",
-	9
+PredictionBox =
+	CreateInput(
+		"PREDICTION",
+		"0.08",
+		9
+	)
+
+TrackConnection(
+	PredictionBox.FocusLost:Connect(function()
+
+		Config.Prediction =
+			ReadNumber(
+				PredictionBox.Text,
+				0.08,
+				0,
+				2
+			)
+
+		PredictionBox.Text =
+			string.format(
+				"%.2f",
+				Config.Prediction
+			)
+
+	end)
 )
-
-PredictionBox.FocusLost:Connect(function()
-
-	Config.Prediction =
-		ReadNumber(
-			PredictionBox.Text,
-			0.08,
-			0,
-			2
-		)
-
-	PredictionBox.Text =
-		string.format(
-			"%.2f",
-			Config.Prediction
-		)
-
-end)
 
 --==============================================================
 -- CONTROLLER
 --==============================================================
 
-CreateSection("CONTROLLER", 10)
+CreateSection(
+	"CONTROLLER",
+	10
+)
 
-LockButtonDisplay = Instance.new("TextButton")
+LockButtonDisplay =
+	Instance.new("TextButton")
 
 LockButtonDisplay.Size =
-	UDim2.new(1, -10, 0, 48)
+	UDim2.new(
+		1,
+		-10,
+		0,
+		48
+	)
 
 LockButtonDisplay.BackgroundColor3 =
-	Color3.fromRGB(24, 24, 27)
+	Color3.fromRGB(
+		24,
+		24,
+		27
+	)
 
 LockButtonDisplay.BorderSizePixel = 0
 
@@ -1201,56 +1788,85 @@ LockButtonDisplay.TextXAlignment =
 	Enum.TextXAlignment.Left
 
 LockButtonDisplay.TextColor3 =
-	Color3.fromRGB(230, 230, 230)
+	Color3.fromRGB(
+		230,
+		230,
+		230
+	)
 
 LockButtonDisplay.LayoutOrder = 11
 
-LockButtonDisplay.Parent = Scroll
+LockButtonDisplay.Parent =
+	Scroll
 
-local ButtonPadding = Instance.new("UIPadding")
+local ButtonPadding =
+	Instance.new("UIPadding")
 
 ButtonPadding.PaddingLeft =
-	UDim.new(0, 14)
+	UDim.new(
+		0,
+		14
+	)
 
-ButtonPadding.Parent = LockButtonDisplay
+ButtonPadding.Parent =
+	LockButtonDisplay
 
-local ButtonCorner = Instance.new("UICorner")
+local ButtonCorner =
+	Instance.new("UICorner")
 
 ButtonCorner.CornerRadius =
-	UDim.new(0, 9)
+	UDim.new(
+		0,
+		9
+	)
 
-ButtonCorner.Parent = LockButtonDisplay
+ButtonCorner.Parent =
+	LockButtonDisplay
 
-UpdateLockButtonText()
+UpdateLockButtonDisplay()
 
 --==============================================================
--- SET LOCK BUTTON
+-- SET CONTROLLER BUTTON
 --==============================================================
 
-LockButtonDisplay.MouseButton1Click:Connect(function()
+TrackConnection(
+	LockButtonDisplay.MouseButton1Click:Connect(
+		function()
 
-	if WaitingForButton then
-		return
-	end
+			if WaitingForButton then
+				return
+			end
 
-	WaitingForButton = true
+			WaitingForButton = true
 
-	LockButtonDisplay.Text =
-		"PRESS CONTROLLER BUTTON..."
+			LockButtonDisplay.Text =
+				"PRESS CONTROLLER BUTTON..."
 
-end)
+		end
+	)
+)
 
 --==============================================================
 -- GUIDE
 --==============================================================
 
-local Guide = Instance.new("TextLabel")
+local Guide =
+	Instance.new("TextLabel")
 
 Guide.Size =
-	UDim2.new(1, -10, 0, 82)
+	UDim2.new(
+		1,
+		-10,
+		0,
+		82
+	)
 
 Guide.BackgroundColor3 =
-	Color3.fromRGB(24, 24, 27)
+	Color3.fromRGB(
+		24,
+		24,
+		27
+	)
 
 Guide.BorderSizePixel = 0
 
@@ -1261,7 +1877,7 @@ Guide.Text =
 	"XENON CONTROLLER GUIDE\n\n" ..
 	"Press your configured controller button to lock.\n" ..
 	"Press it again to unlock.\n" ..
-	"Target stays locked until you unlock."
+	"Xenon stays on the original target."
 
 Guide.TextSize = 9
 
@@ -1274,37 +1890,61 @@ Guide.TextYAlignment =
 	Enum.TextYAlignment.Center
 
 Guide.TextColor3 =
-	Color3.fromRGB(145, 145, 150)
+	Color3.fromRGB(
+		145,
+		145,
+		150
+	)
 
 Guide.LayoutOrder = 12
 
-Guide.Parent = Scroll
+Guide.Parent =
+	Scroll
 
-local GuideCorner = Instance.new("UICorner")
+local GuideCorner =
+	Instance.new("UICorner")
 
 GuideCorner.CornerRadius =
-	UDim.new(0, 9)
+	UDim.new(
+		0,
+		9
+	)
 
-GuideCorner.Parent = Guide
+GuideCorner.Parent =
+	Guide
 
-local GuidePadding = Instance.new("UIPadding")
+local GuidePadding =
+	Instance.new("UIPadding")
 
 GuidePadding.PaddingLeft =
-	UDim.new(0, 13)
+	UDim.new(
+		0,
+		13
+	)
 
 GuidePadding.PaddingRight =
-	UDim.new(0, 13)
+	UDim.new(
+		0,
+		13
+	)
 
-GuidePadding.Parent = Guide
+GuidePadding.Parent =
+	Guide
 
 --==============================================================
 -- FOOTER
 --==============================================================
 
-local Footer = Instance.new("TextLabel")
+local Footer =
+	Instance.new("TextLabel")
 
 Footer.Size =
-	UDim2.new(1, -10, 0, 30)
+	UDim2.new(
+		1,
+		-10,
+		0,
+		30
+	)
 
 Footer.BackgroundTransparency = 1
 
@@ -1317,137 +1957,207 @@ Footer.Text =
 Footer.TextSize = 8
 
 Footer.TextColor3 =
-	Color3.fromRGB(80, 80, 85)
+	Color3.fromRGB(
+		80,
+		80,
+		85
+	)
 
 Footer.LayoutOrder = 13
 
-Footer.Parent = Scroll
+Footer.Parent =
+	Scroll
 
 --==============================================================
 -- MODE DROPDOWN
 --==============================================================
 
-ModeButton.MouseButton1Click:Connect(function()
+TrackConnection(
+	ModeButton.MouseButton1Click:Connect(
+		function()
 
-	Dropdown.Visible =
-		not Dropdown.Visible
+			Dropdown.Visible =
+				not Dropdown.Visible
 
-	if Dropdown.Visible then
-		Scroll.CanvasSize =
-			UDim2.new(0, 0, 0, 850)
-	else
-		Scroll.CanvasSize =
-			UDim2.new(0, 0, 0, 760)
-	end
+			if Dropdown.Visible then
 
-end)
+				Scroll.CanvasSize =
+					UDim2.new(
+						0,
+						0,
+						0,
+						850
+					)
 
-FirstPersonButton.MouseButton1Click:Connect(function()
+			else
 
-	Config.CameraMode =
-		"First Person"
+				Scroll.CanvasSize =
+					UDim2.new(
+						0,
+						0,
+						0,
+						760
+					)
+			end
 
-	ModeButton.Text =
-		"FIRST PERSON"
+		end
+	)
+)
 
-	Dropdown.Visible = false
+TrackConnection(
+	FirstPersonButton.MouseButton1Click:Connect(
+		function()
 
-	Scroll.CanvasSize =
-		UDim2.new(0, 0, 0, 760)
+			Config.CameraMode =
+				"First Person"
 
-end)
+			ModeButton.Text =
+				"FIRST PERSON"
 
-ThirdPersonButton.MouseButton1Click:Connect(function()
+			Dropdown.Visible = false
 
-	Config.CameraMode =
-		"Third Person"
+			Scroll.CanvasSize =
+				UDim2.new(
+					0,
+					0,
+					0,
+					760
+				)
 
-	ModeButton.Text =
-		"THIRD PERSON"
+		end
+	)
+)
 
-	Dropdown.Visible = false
+TrackConnection(
+	ThirdPersonButton.MouseButton1Click:Connect(
+		function()
 
-	Scroll.CanvasSize =
-		UDim2.new(0, 0, 0, 760)
+			Config.CameraMode =
+				"Third Person"
 
-end)
+			ModeButton.Text =
+				"THIRD PERSON"
+
+			Dropdown.Visible = false
+
+			Scroll.CanvasSize =
+				UDim2.new(
+					0,
+					0,
+					0,
+					760
+				)
+
+		end
+	)
+)
 
 --==============================================================
 -- DRAGGING
 --==============================================================
 
-TopBar.InputBegan:Connect(function(input)
+TrackConnection(
+	TopBar.InputBegan:Connect(
+		function(input)
 
-	if input.UserInputType ==
-		Enum.UserInputType.MouseButton1
-		or input.UserInputType ==
-		Enum.UserInputType.Touch then
+			if input.UserInputType ==
+				Enum.UserInputType.MouseButton1
+				or input.UserInputType ==
+				Enum.UserInputType.Touch then
 
-		Dragging = true
+				Dragging = true
 
-		DragStart =
-			input.Position
+				DragStart =
+					input.Position
 
-		DragStartPosition =
-			MainFrame.Position
+				DragStartPosition =
+					MainFrame.Position
 
-		input.Changed:Connect(function()
+				input.Changed:Connect(
+					function()
 
-			if input.UserInputState ==
-				Enum.UserInputState.End then
+						if input.UserInputState ==
+							Enum.UserInputState.End then
 
-				Dragging = false
+							Dragging = false
+						end
+
+					end
+				)
+			end
+		end
+	)
+)
+
+TrackConnection(
+	UserInputService.InputChanged:Connect(
+		function(input)
+
+			if not Dragging then
+				return
 			end
 
-		end)
-	end
-end)
+			if input.UserInputType ==
+				Enum.UserInputType.MouseMovement
+				or input.UserInputType ==
+				Enum.UserInputType.Touch then
 
-UserInputService.InputChanged:Connect(function(input)
+				local delta =
+					input.Position -
+					DragStart
 
-	if not Dragging then
-		return
-	end
+				MainFrame.Position =
+					UDim2.new(
+						DragStartPosition.X.Scale,
+						DragStartPosition.X.Offset +
+							delta.X,
 
-	if input.UserInputType ==
-		Enum.UserInputType.MouseMovement
-		or input.UserInputType ==
-		Enum.UserInputType.Touch then
+						DragStartPosition.Y.Scale,
+						DragStartPosition.Y.Offset +
+							delta.Y
+					)
+			end
 
-		local delta =
-			input.Position - DragStart
-
-		MainFrame.Position =
-			UDim2.new(
-				DragStartPosition.X.Scale,
-				DragStartPosition.X.Offset + delta.X,
-
-				DragStartPosition.Y.Scale,
-				DragStartPosition.Y.Offset + delta.Y
-			)
-	end
-end)
+		end
+	)
+)
 
 --==============================================================
 -- FLOATING X
 --==============================================================
 
-FloatingButton = Instance.new("TextButton")
+FloatingButton =
+	Instance.new("TextButton")
 
 FloatingButton.Name =
 	"FloatingX"
 
 FloatingButton.AnchorPoint =
-	Vector2.new(1, 0)
+	Vector2.new(
+		1,
+		0
+	)
 
 FloatingButton.Position =
-	UDim2.new(1, -18, 0, 18)
+	UDim2.new(
+		1,
+		-18,
+		0,
+		18
+	)
 
 FloatingButton.Size =
-	UDim2.fromOffset(48, 48)
+	UDim2.fromOffset(
+		48,
+		48
+	)
 
 FloatingButton.BackgroundColor3 =
-	Color3.fromRGB(22, 22, 25)
+	Color3.fromRGB(
+		22,
+		22,
+		25
+	)
 
 FloatingButton.BorderSizePixel = 0
 
@@ -1459,124 +2169,161 @@ FloatingButton.Text = "X"
 FloatingButton.TextSize = 22
 
 FloatingButton.TextColor3 =
-	Color3.fromRGB(235, 45, 55)
+	Color3.fromRGB(
+		235,
+		45,
+		55
+	)
 
 FloatingButton.Visible = false
 
-FloatingButton.Parent = ScreenGui
+FloatingButton.Parent =
+	ScreenGui
 
-local FloatingCorner = Instance.new("UICorner")
+local FloatingCorner =
+	Instance.new("UICorner")
 
 FloatingCorner.CornerRadius =
-	UDim.new(0, 12)
+	UDim.new(
+		0,
+		12
+	)
 
-FloatingCorner.Parent = FloatingButton
+FloatingCorner.Parent =
+	FloatingButton
 
-local FloatingStroke = Instance.new("UIStroke")
+local FloatingStroke =
+	Instance.new("UIStroke")
 
 FloatingStroke.Color =
-	Color3.fromRGB(70, 70, 75)
+	Color3.fromRGB(
+		70,
+		70,
+		75
+	)
 
 FloatingStroke.Thickness = 1
 
-FloatingStroke.Parent = FloatingButton
+FloatingStroke.Parent =
+	FloatingButton
 
 --==============================================================
--- CLOSE / OPEN
+-- CLOSE
 --==============================================================
 
-CloseButton.MouseButton1Click:Connect(function()
+TrackConnection(
+	CloseButton.MouseButton1Click:Connect(
+		function()
 
-	GuiVisible = false
+			MainFrame.Visible = false
 
-	MainFrame.Visible = false
+			FloatingButton.Visible = true
 
-	FloatingButton.Visible = true
+		end
+	)
+)
 
-end)
+--==============================================================
+-- REOPEN
+--==============================================================
 
-FloatingButton.MouseButton1Click:Connect(function()
+TrackConnection(
+	FloatingButton.MouseButton1Click:Connect(
+		function()
 
-	GuiVisible = true
+			MainFrame.Visible = true
 
-	MainFrame.Visible = true
+			FloatingButton.Visible = false
 
-	FloatingButton.Visible = false
-
-end)
+		end
+	)
+)
 
 --==============================================================
 -- CONTROLLER INPUT
 --==============================================================
 
-UserInputService.InputBegan:Connect(function(
-	input,
-	processed
+TrackConnection(
+	UserInputService.InputBegan:Connect(
+		function(input, processed)
+
+			if not IsGamepad(input) then
+				return
+			end
+
+			local keyName =
+				input.KeyCode.Name
+
+			--==================================================
+			-- CONFIGURING LOCK BUTTON
+			--==================================================
+
+			if WaitingForButton then
+
+				if not SupportedButtons[keyName] then
+					return
+				end
+
+				WaitingForButton = false
+
+				Config.LockButton =
+					input.KeyCode
+
+				UpdateLockButtonDisplay()
+
+				return
+			end
+
+			--==================================================
+			-- NORMAL LOCK
+			--==================================================
+
+			if input.KeyCode ==
+				Config.LockButton then
+
+				ToggleLock()
+
+			end
+
+		end
+	)
 )
 
-	if not IsGamepad(input) then
-		return
-	end
+--==============================================================
+-- PLAYER LEAVING
+--==============================================================
 
-	--==========================================================
-	-- BUTTON CONFIGURATION MODE
-	--==========================================================
+TrackConnection(
+	Players.PlayerRemoving:Connect(
+		function(player)
 
-	if WaitingForButton then
+			if player ==
+				LockedTarget then
 
-		local keyCode = input.KeyCode
+				Unlock()
 
-		if keyCode == Enum.KeyCode.Unknown then
-			return
+			end
+
 		end
-
-		WaitingForButton = false
-
-		Config.LockButton =
-			keyCode
-
-		UpdateLockButtonText()
-
-		return
-	end
-
-	--==========================================================
-	-- NORMAL LOCK INPUT
-	--==========================================================
-
-	if input.KeyCode ==
-		Config.LockButton then
-
-		ToggleLock()
-
-	end
-
-end)
-
---==============================================================
--- TARGET PLAYER LEAVING
---==============================================================
-
-Players.PlayerRemoving:Connect(function(player)
-
-	if player == LockedTarget then
-		Unlock()
-	end
-
-end)
+	)
+)
 
 --==============================================================
 -- LOCAL PLAYER RESPAWN
 --==============================================================
 
-LocalPlayer.CharacterAdded:Connect(function()
+TrackConnection(
+	LocalPlayer.CharacterAdded:Connect(
+		function()
 
-	Unlock()
+			Unlock()
 
-end)
+		end
+	)
+)
 
 --==============================================================
--- CAMERA FUNCTIONS
+-- PREDICTION
 --==============================================================
 
 local function GetPredictedPosition(
@@ -1585,7 +2332,8 @@ local function GetPredictedPosition(
 )
 
 	return position +
-		velocity * Config.Prediction
+		velocity *
+		Config.Prediction
 
 end
 
@@ -1595,7 +2343,8 @@ end
 
 local function GetFirstPersonAim()
 
-	local target = LockedTarget
+	local target =
+		LockedTarget
 
 	if not target then
 		return nil
@@ -1609,29 +2358,33 @@ local function GetFirstPersonAim()
 	end
 
 	local head =
-		character:FindFirstChild("Head")
+		character:FindFirstChild(
+			"Head"
+		)
 
 	if not head then
+
 		return GetPredictedPosition(
 			root.Position,
 			root.AssemblyLinearVelocity
 		)
+
 	end
 
 	return GetPredictedPosition(
 		head.Position,
 		head.AssemblyLinearVelocity
 	)
-
 end
 
 --==============================================================
--- THIRD PERSON STATIC SCREEN OFFSET
+-- THIRD PERSON STATIC SCREEN AIM
 --==============================================================
 
 local function GetThirdPersonAim()
 
-	local target = LockedTarget
+	local target =
+		LockedTarget
 
 	if not target then
 		return nil
@@ -1647,38 +2400,58 @@ local function GetThirdPersonAim()
 	local Camera =
 		workspace.CurrentCamera
 
-	-- Predict FIRST.
+	if not Camera then
+		return nil
+	end
+
+	--==========================================================
+	-- PREDICT FIRST
+	--==========================================================
+
 	local predicted =
 		GetPredictedPosition(
 			root.Position,
 			root.AssemblyLinearVelocity
 		)
 
-	-- Get the predicted target's screen position.
+	--==========================================================
+	-- PROJECT TO SCREEN
+	--==========================================================
+
 	local screenPosition, onScreen =
 		Camera:WorldToViewportPoint(
 			predicted
 		)
 
-	if not onScreen or screenPosition.Z <= 0 then
+	if not onScreen
+		or screenPosition.Z <= 0 then
+
 		return predicted
 	end
 
-	-- Positive offset = BELOW target.
-	--
-	-- This is SCREEN SPACE rather than world space.
+	--==========================================================
+	-- STATIC SCREEN OFFSET
+	--==========================================================
+
+	-- Positive = below.
+	-- Negative = above.
+
 	local shiftedY =
 		screenPosition.Y +
 		Config.AimOffset
 
-	-- Build a ray from the shifted screen point.
+	--==========================================================
+	-- DEPROJECT
+	--==========================================================
+
 	local ray =
 		Camera:ViewportPointToRay(
 			screenPosition.X,
 			shiftedY
 		)
 
-	-- Find target depth relative to camera.
+	-- Keep the same camera depth as target.
+
 	local cameraSpace =
 		Camera.CFrame:PointToObjectSpace(
 			predicted
@@ -1691,50 +2464,57 @@ local function GetThirdPersonAim()
 		return predicted
 	end
 
-	-- Make sure the resulting world point remains at
-	-- approximately the same depth as the target.
-	local depthFactor =
+	local forward =
 		ray.Direction:Dot(
 			Camera.CFrame.LookVector
 		)
 
-	if math.abs(depthFactor) < 0.0001 then
+	if math.abs(forward) < 0.0001 then
 		return predicted
 	end
 
 	local distance =
-		targetDepth / depthFactor
+		targetDepth /
+		forward
 
 	return ray.Origin +
-		ray.Direction * distance
-
+		ray.Direction *
+		distance
 end
 
 --==============================================================
 -- CAMERA UPDATE
 --==============================================================
 
-local function UpdateCamera(deltaTime)
+local function UpdateCamera(
+	deltaTime
+)
 
 	if not IsLocked then
 		return
 	end
 
 	--==========================================================
-	-- NEVER SEARCH FOR ANOTHER TARGET HERE
+	-- STICKY TARGET
 	--==========================================================
 
-	local target = LockedTarget
+	local target =
+		LockedTarget
 
 	if not target then
+
 		Unlock()
+
 		return
 	end
 
 	--==========================================================
-	-- ORIGINAL TARGET INVALID?
-	-- UNLOCK — DO NOT SWITCH TARGET.
+	-- TARGET INVALID
 	--==========================================================
+
+	-- IMPORTANT:
+	-- We unlock.
+	-- We NEVER select a replacement target.
 
 	if not IsValidTarget(target) then
 
@@ -1744,7 +2524,7 @@ local function UpdateCamera(deltaTime)
 	end
 
 	--==========================================================
-	-- FIND AIM POINT
+	-- AIM POINT
 	--==========================================================
 
 	local aimPosition
@@ -1770,11 +2550,15 @@ local function UpdateCamera(deltaTime)
 	end
 
 	--==========================================================
-	-- CURRENT CAMERA
+	-- CAMERA
 	--==========================================================
 
 	local Camera =
 		workspace.CurrentCamera
+
+	if not Camera then
+		return
+	end
 
 	local cameraPosition =
 		Camera.CFrame.Position
@@ -1783,11 +2567,13 @@ local function UpdateCamera(deltaTime)
 		aimPosition -
 		cameraPosition
 
-	if direction.Magnitude < 0.001 then
+	if direction.Magnitude <
+		0.001 then
+
 		return
 	end
 
-	local desiredCFrame =
+	local desired =
 		CFrame.lookAt(
 			cameraPosition,
 			aimPosition
@@ -1800,7 +2586,7 @@ local function UpdateCamera(deltaTime)
 	if Config.Smoothing <= 0 then
 
 		Camera.CFrame =
-			desiredCFrame
+			desired
 
 		return
 	end
@@ -1826,20 +2612,16 @@ local function UpdateCamera(deltaTime)
 
 	Camera.CFrame =
 		Camera.CFrame:Lerp(
-			desiredCFrame,
+			desired,
 			alpha
 		)
-
 end
 
 --==============================================================
--- CAMERA LOOP
+-- CAMERA RENDER LOOP
 --==============================================================
 
--- Camera priority is deliberately just after Roblox's camera.
---
--- This avoids relying on Enum.RenderPriority.Last, which can
--- cause compatibility problems in some environments.
+-- Run after Roblox's normal camera update.
 
 local CameraPriority =
 	Enum.RenderPriority.Camera.Value + 1
@@ -1849,37 +2631,43 @@ RunService:BindToRenderStep(
 	CameraPriority,
 	function(deltaTime)
 
+		if Destroyed then
+			return
+		end
+
 		local success, errorMessage =
 			pcall(function()
 
-				UpdateCamera(deltaTime)
+				UpdateCamera(
+					deltaTime
+				)
 
 			end)
 
 		if not success then
 
 			warn(
-				"[XENON CAMERA ERROR]",
-				errorMessage
+				"[XENON CAMERA ERROR] " ..
+				tostring(errorMessage)
 			)
 
 			Unlock()
 		end
-
 	end
 )
 
 --==============================================================
--- FINAL UI STATE
+-- FINAL STATUS
 --==============================================================
 
 UpdateStatus()
-UpdateLockButtonText()
+UpdateLockButtonDisplay()
 
-print("====================================")
-print("XENON CONTROLLER SYSTEM LOADED")
-print("Lock Button: " .. GetButtonName(Config.LockButton))
-print("Camera Mode: " .. Config.CameraMode)
-print("Smoothing: " .. tostring(Config.Smoothing))
-print("Prediction: " .. tostring(Config.Prediction))
-print("====================================")
+print("----------------------------------------")
+print("XENON LOADED")
+print("Lock Button:", GetButtonName(Config.LockButton))
+print("Mode:", Config.CameraMode)
+print("Offset:", Config.AimOffset)
+print("Smoothing:", Config.Smoothing)
+print("Prediction:", Config.Prediction)
+print("----------------------------------------")
