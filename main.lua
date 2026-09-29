@@ -49,17 +49,16 @@ local Config = {
     -- 3P offset now starts at 23.5
     AimOffset = 23.5,
 
-    ReferenceDistance = 100,
+    -- Distance where the 3P Offset value is exact.
+    ReferenceDistance = 40,
 
-    -- 3P screen-space correction keeps the controller aim point
-    -- anchored around the upper torso/head instead of drifting
-    -- above or below as camera distance changes.
-    ThirdPersonCorrection = true,
+    -- 3P tracking
+    -- AimOffset is the exact offset at the calibration distance.
+    -- Increasing it always moves the aim lower.
     ThirdPersonAnchor = 0.65,
-    ThirdPersonCorrectionStrength = 0.055,
-    ThirdPersonMinDistanceScale = 0.75,
-    ThirdPersonMaxDistanceScale = 2.5,
-    ThirdPersonMaxCorrection = 35,
+    ThirdPersonCalibrationDistance = 40,
+    ThirdPersonMinOffset = 0,
+    ThirdPersonMaxOffset = 100,
 
     Smoothing = 0,
 
@@ -339,11 +338,11 @@ CloseCorner.Parent = CloseButton
 --==============================================================
 
 local Scroll = Instance.new("ScrollingFrame")
-Scroll.Name = "Scroll"
+Scroll.Name = "TabAim"
 Scroll.BackgroundTransparency = 1
 Scroll.BorderSizePixel = 0
-Scroll.Position = UDim2.new(0, 10, 0, 66)
-Scroll.Size = UDim2.new(1, -20, 1, -76)
+Scroll.Position = UDim2.new(0, 10, 0, 108)
+Scroll.Size = UDim2.new(1, -20, 1, -118)
 Scroll.CanvasSize = UDim2.fromOffset(0, 1200)
 Scroll.ScrollBarThickness = 3
 Scroll.ScrollBarImageColor3 = RED
@@ -351,17 +350,161 @@ Scroll.ScrollingDirection = Enum.ScrollingDirection.Y
 Scroll.ZIndex = 11
 Scroll.Parent = MainFrame
 
-local Padding = Instance.new("UIPadding")
-Padding.PaddingLeft = UDim.new(0, 5)
-Padding.PaddingRight = UDim.new(0, 5)
-Padding.PaddingTop = UDim.new(0, 3)
-Padding.PaddingBottom = UDim.new(0, 12)
-Padding.Parent = Scroll
+local function ConfigureTabContainer(Container, Name)
+    Container.Name = Name
+    Container.BackgroundTransparency = 1
+    Container.BorderSizePixel = 0
+    Container.Position = Scroll.Position
+    Container.Size = Scroll.Size
+    Container.CanvasSize = UDim2.fromOffset(0, 1200)
+    Container.ScrollBarThickness = 3
+    Container.ScrollBarImageColor3 = RED
+    Container.ScrollingDirection = Enum.ScrollingDirection.Y
+    Container.ZIndex = 11
+    Container.Visible = false
+    Container.Parent = MainFrame
 
-local Layout = Instance.new("UIListLayout")
-Layout.Padding = UDim.new(0, 8)
-Layout.SortOrder = Enum.SortOrder.LayoutOrder
-Layout.Parent = Scroll
+    local Padding = Instance.new("UIPadding")
+    Padding.PaddingLeft = UDim.new(0, 5)
+    Padding.PaddingRight = UDim.new(0, 5)
+    Padding.PaddingTop = UDim.new(0, 3)
+    Padding.PaddingBottom = UDim.new(0, 12)
+    Padding.Parent = Container
+
+    local Layout = Instance.new("UIListLayout")
+    Layout.Padding = UDim.new(0, 8)
+    Layout.SortOrder = Enum.SortOrder.LayoutOrder
+    Layout.Parent = Container
+
+    return Layout
+end
+
+local VisualsTab = Instance.new("ScrollingFrame")
+local WhitelistTab = Instance.new("ScrollingFrame")
+
+local AimLayout = Instance.new("UIListLayout")
+AimLayout.Padding = UDim.new(0, 8)
+AimLayout.SortOrder = Enum.SortOrder.LayoutOrder
+AimLayout.Parent = Scroll
+
+local AimPadding = Instance.new("UIPadding")
+AimPadding.PaddingLeft = UDim.new(0, 5)
+AimPadding.PaddingRight = UDim.new(0, 5)
+AimPadding.PaddingTop = UDim.new(0, 3)
+AimPadding.PaddingBottom = UDim.new(0, 12)
+AimPadding.Parent = Scroll
+
+local VisualsLayout = ConfigureTabContainer(VisualsTab, "TabVisuals")
+local WhitelistLayout = ConfigureTabContainer(WhitelistTab, "TabWhitelist")
+
+local TabBar = Instance.new("Frame")
+TabBar.Name = "TabBar"
+TabBar.BackgroundColor3 = DARK
+TabBar.BorderSizePixel = 0
+TabBar.Position = UDim2.new(0, 10, 0, 66)
+TabBar.Size = UDim2.new(1, -20, 0, 38)
+TabBar.ZIndex = 20
+TabBar.Parent = MainFrame
+
+local TabBarCorner = Instance.new("UICorner")
+TabBarCorner.CornerRadius = UDim.new(0, 8)
+TabBarCorner.Parent = TabBar
+
+local TabPadding = Instance.new("UIPadding")
+TabPadding.PaddingLeft = UDim.new(0, 4)
+TabPadding.PaddingRight = UDim.new(0, 4)
+TabPadding.Parent = TabBar
+
+local TabLayout = Instance.new("UIListLayout")
+TabLayout.FillDirection = Enum.FillDirection.Horizontal
+TabLayout.HorizontalAlignment = Enum.HorizontalAlignment.Left
+TabLayout.VerticalAlignment = Enum.VerticalAlignment.Center
+TabLayout.SortOrder = Enum.SortOrder.LayoutOrder
+TabLayout.Padding = UDim.new(0, 2)
+TabLayout.Parent = TabBar
+
+local CurrentTabContainer = Scroll
+local CurrentTabName = "AIM"
+local TabButtons = {}
+local TabIndicators = {}
+
+local function CreateTab(Name, Order)
+    local Button = Instance.new("TextButton")
+    Button.Name = Name .. "Tab"
+    Button.LayoutOrder = Order
+    Button.BackgroundTransparency = 1
+    Button.BorderSizePixel = 0
+    Button.Size = UDim2.new(1/3, -3, 1, 0)
+    Button.Text = Name
+    Button.TextColor3 = GRAY
+    Button.TextSize = 11
+    Button.Font = Enum.Font.GothamSemibold
+    Button.AutoButtonColor = false
+    Button.ZIndex = 22
+    Button.Parent = TabBar
+
+    local Indicator = Instance.new("Frame")
+    Indicator.Name = "Indicator"
+    Indicator.AnchorPoint = Vector2.new(0.5, 1)
+    Indicator.Position = UDim2.new(0.5, 0, 1, 0)
+    Indicator.Size = UDim2.new(0.55, 0, 0, 2)
+    Indicator.BackgroundColor3 = RED
+    Indicator.BorderSizePixel = 0
+    Indicator.Visible = false
+    Indicator.ZIndex = 23
+    Indicator.Parent = Button
+
+    TabButtons[Name] = Button
+    TabIndicators[Name] = Indicator
+
+    return Button
+end
+
+local AimTabButton = CreateTab("AIM", 1)
+local VisualsTabButton = CreateTab("VISUALS", 2)
+local WhitelistTabButton = CreateTab("WHITELIST", 3)
+
+local function UpdateTabCanvas(Container, Layout)
+    Container.CanvasSize = UDim2.fromOffset(0, Layout.AbsoluteContentSize.Y + 25)
+end
+
+local function SetActiveTab(Name)
+    local Containers = {
+        AIM = Scroll,
+        VISUALS = VisualsTab,
+        WHITELIST = WhitelistTab,
+    }
+
+    local Layouts = {
+        AIM = AimLayout,
+        VISUALS = VisualsLayout,
+        WHITELIST = WhitelistLayout,
+    }
+
+    local Container = Containers[Name]
+    if not Container then return end
+
+    CurrentTabName = Name
+    CurrentTabContainer = Container
+
+    for TabName, TabButton in pairs(TabButtons) do
+        local Active = TabName == Name
+        TabButton.TextColor3 = Active and WHITE or GRAY
+        TabIndicators[TabName].Visible = Active
+    end
+
+    for TabName, TabContainer in pairs(Containers) do
+        TabContainer.Visible = TabName == Name
+    end
+
+    UpdateTabCanvas(Container, Layouts[Name])
+end
+
+AimTabButton.Activated:Connect(function() SetActiveTab("AIM") end)
+VisualsTabButton.Activated:Connect(function() SetActiveTab("VISUALS") end)
+WhitelistTabButton.Activated:Connect(function() SetActiveTab("WHITELIST") end)
+
+SetActiveTab("AIM")
 
 --==============================================================
 -- MOBILE RESPONSIVE
@@ -394,11 +537,23 @@ local function UpdateResponsiveState()
 
         TopBar.Size = UDim2.new(1, 0, 0, 50)
 
-        Scroll.Position =
+        TabBar.Position =
             UDim2.new(0, 8, 0, 57)
+        TabBar.Size =
+            UDim2.new(1, -16, 0, 34)
 
+        Scroll.Position =
+            UDim2.new(0, 8, 0, 99)
         Scroll.Size =
-            UDim2.new(1, -16, 1, -65)
+            UDim2.new(1, -16, 1, -107)
+        VisualsTab.Position = Scroll.Position
+        VisualsTab.Size = Scroll.Size
+        WhitelistTab.Position = Scroll.Position
+        WhitelistTab.Size = Scroll.Size
+
+        for _, Button in pairs(TabButtons) do
+            Button.TextSize = 9
+        end
 
         Title.TextSize = 17
         Title.Position =
@@ -414,10 +569,9 @@ local function UpdateResponsiveState()
         CloseButton.Position =
             UDim2.new(1, -9, 0.5, 0)
 
-        Padding.PaddingLeft =
+        AimPadding.PaddingLeft =
             UDim.new(0, 3)
-
-        Padding.PaddingRight =
+        AimPadding.PaddingRight =
             UDim.new(0, 3)
 
     elseif Viewport.X <= 1000 then
@@ -427,11 +581,23 @@ local function UpdateResponsiveState()
         TopBar.Size =
             UDim2.new(1, 0, 0, 54)
 
-        Scroll.Position =
+        TabBar.Position =
             UDim2.new(0, 9, 0, 62)
+        TabBar.Size =
+            UDim2.new(1, -18, 0, 36)
 
+        Scroll.Position =
+            UDim2.new(0, 9, 0, 104)
         Scroll.Size =
-            UDim2.new(1, -18, 1, -70)
+            UDim2.new(1, -18, 1, -112)
+        VisualsTab.Position = Scroll.Position
+        VisualsTab.Size = Scroll.Size
+        WhitelistTab.Position = Scroll.Position
+        WhitelistTab.Size = Scroll.Size
+
+        for _, Button in pairs(TabButtons) do
+            Button.TextSize = 10
+        end
 
         Title.TextSize = 19
 
@@ -440,10 +606,9 @@ local function UpdateResponsiveState()
         CloseButton.Size =
             UDim2.fromOffset(30, 30)
 
-        Padding.PaddingLeft =
+        AimPadding.PaddingLeft =
             UDim.new(0, 4)
-
-        Padding.PaddingRight =
+        AimPadding.PaddingRight =
             UDim.new(0, 4)
 
     else
@@ -453,11 +618,23 @@ local function UpdateResponsiveState()
         TopBar.Size =
             UDim2.new(1, 0, 0, 58)
 
-        Scroll.Position =
+        TabBar.Position =
             UDim2.new(0, 10, 0, 66)
+        TabBar.Size =
+            UDim2.new(1, -20, 0, 38)
 
+        Scroll.Position =
+            UDim2.new(0, 10, 0, 108)
         Scroll.Size =
-            UDim2.new(1, -20, 1, -76)
+            UDim2.new(1, -20, 1, -118)
+        VisualsTab.Position = Scroll.Position
+        VisualsTab.Size = Scroll.Size
+        WhitelistTab.Position = Scroll.Position
+        WhitelistTab.Size = Scroll.Size
+
+        for _, Button in pairs(TabButtons) do
+            Button.TextSize = 11
+        end
 
         Title.TextSize = 21
 
@@ -466,10 +643,9 @@ local function UpdateResponsiveState()
         CloseButton.Size =
             UDim2.fromOffset(32, 32)
 
-        Padding.PaddingLeft =
+        AimPadding.PaddingLeft =
             UDim.new(0, 5)
-
-        Padding.PaddingRight =
+        AimPadding.PaddingRight =
             UDim.new(0, 5)
     end
 end
@@ -528,7 +704,7 @@ local function CreateSection(Text)
         Enum.TextXAlignment.Left
 
     Section.ZIndex = 12
-    Section.Parent = Scroll
+    Section.Parent = CurrentTabContainer
 
     return Section
 end
@@ -547,7 +723,7 @@ local function CreateRow(Height)
         UDim2.new(1, 0, 0, Height)
 
     Row.ZIndex = 12
-    Row.Parent = Scroll
+    Row.Parent = CurrentTabContainer
 
     local Corner = Instance.new("UICorner")
     Corner.CornerRadius = UDim.new(0, 8)
@@ -976,6 +1152,7 @@ RebindCorner.Parent = RebindButton
 -- VISUALS
 --==============================================================
 
+SetActiveTab("VISUALS")
 CreateSection("VISUALS")
 
 local ESPEnabledRow, ESPEnabledButton =
@@ -1034,6 +1211,7 @@ local ESPWhitelistRow, ESPWhitelistButton =
 -- WHITELIST
 --==============================================================
 
+SetActiveTab("WHITELIST")
 CreateSection("WHITELIST")
 
 local WhitelistInfoRow = CreateRow(45)
@@ -1075,7 +1253,7 @@ WhitelistContainer.Size =
     UDim2.new(1, 0, 0, 10)
 
 WhitelistContainer.ZIndex = 12
-WhitelistContainer.Parent = Scroll
+WhitelistContainer.Parent = CurrentTabContainer
 
 local WhitelistLayout = Instance.new("UIListLayout")
 WhitelistLayout.Padding =
@@ -1091,6 +1269,7 @@ WhitelistLayout.Parent =
 -- STATUS
 --==============================================================
 
+SetActiveTab("AIM")
 CreateSection("STATUS")
 
 local StatusRow = CreateRow(55)
@@ -1743,13 +1922,16 @@ local function GetPredictedPosition(
 end
 
 --==============================================================
--- ADAPTIVE OFFSET
+-- THIRD PERSON ADAPTIVE OFFSET
 --==============================================================
 
 local function GetAdaptiveOffset(TargetRoot)
-    local CurrentCamera = workspace.CurrentCamera
+    if not TargetRoot then
+        return Config.AimOffset
+    end
 
-    if not CurrentCamera or not TargetRoot then
+    local CurrentCamera = workspace.CurrentCamera
+    if not CurrentCamera then
         return Config.AimOffset
     end
 
@@ -1758,67 +1940,36 @@ local function GetAdaptiveOffset(TargetRoot)
         return Config.AimOffset
     end
 
-    -- Keep AimOffset as a DIRECT vertical offset.
-    -- Increasing AimOffset therefore always moves the camera
-    -- target lower instead of being weakened by distance scaling.
-    local BaseOffset = Config.AimOffset
-
-    if not Config.ThirdPersonCorrection then
-        return math.clamp(BaseOffset, -100, 100)
-    end
-
+    -- The calibration point is the distance where AimOffset is exact.
+    -- 23.5 at 40 studs therefore becomes the baseline.
+    -- This is intentionally calculated from distance only: no expensive
+    -- per-frame screen feedback and no correction fighting the user value.
     local Head = Character:FindFirstChild("Head")
     local Alpha = math.clamp(Config.ThirdPersonAnchor, 0, 1)
 
     local AnchorPosition = TargetRoot.Position
-
     if Head then
         AnchorPosition = TargetRoot.Position:Lerp(Head.Position, Alpha)
     end
 
-    local Viewport = CurrentCamera.ViewportSize
-
-    if Viewport.X <= 0 or Viewport.Y <= 0 then
-        return math.clamp(BaseOffset, -100, 100)
-    end
-
-    local ScreenPosition, OnScreen =
-        CurrentCamera:WorldToViewportPoint(AnchorPosition)
-
-    if not OnScreen or ScreenPosition.Z <= 0 then
-        return math.clamp(BaseOffset, -100, 100)
-    end
-
-    local ScreenCenterY = Viewport.Y * 0.5
-
-    -- Positive error means the anchor is BELOW the screen center.
-    -- To bring it UP, the vertical offset must DECREASE.
-    -- This sign is the important fix for the previous version.
-    local VerticalError = ScreenPosition.Y - ScreenCenterY
-
     local Distance =
         (AnchorPosition - CurrentCamera.CFrame.Position).Magnitude
 
-    local DistanceScale = math.clamp(
-        Distance / 40,
-        Config.ThirdPersonMinDistanceScale,
-        Config.ThirdPersonMaxDistanceScale
-    )
+    local CalibrationDistance =
+        math.max(Config.ReferenceDistance, 1)
 
-    local Correction =
-        -VerticalError *
-        Config.ThirdPersonCorrectionStrength *
-        DistanceScale
+    local DistanceScale =
+        Distance / CalibrationDistance
 
-    -- Opposite sign: if the anchor is too high on screen,
-    -- increase the offset and look lower; if it is too low,
-    -- decrease the offset and look higher.
-    local CorrectedOffset = BaseOffset + Correction
+    -- Scale the offset so the same camera-angle relationship is retained
+    -- when the target gets closer or farther away.
+    local FinalOffset =
+        Config.AimOffset * DistanceScale
 
     return math.clamp(
-        CorrectedOffset,
-        -100,
-        100
+        FinalOffset,
+        Config.ThirdPersonMinOffset,
+        Config.ThirdPersonMaxOffset
     )
 end
 
@@ -2342,19 +2493,23 @@ Camera:GetPropertyChangedSignal(
 -- CANVAS SIZE
 --==============================================================
 
-Layout:GetPropertyChangedSignal(
+AimLayout:GetPropertyChangedSignal(
     "AbsoluteContentSize"
-):Connect(
-    function()
+):Connect(function()
+    UpdateTabCanvas(Scroll, AimLayout)
+end)
 
-        Scroll.CanvasSize =
-            UDim2.fromOffset(
-                0,
-                Layout.AbsoluteContentSize.Y +
-                    25
-            )
-    end
-)
+VisualsLayout:GetPropertyChangedSignal(
+    "AbsoluteContentSize"
+):Connect(function()
+    UpdateTabCanvas(VisualsTab, VisualsLayout)
+end)
+
+WhitelistLayout:GetPropertyChangedSignal(
+    "AbsoluteContentSize"
+):Connect(function()
+    UpdateTabCanvas(WhitelistTab, WhitelistLayout)
+end)
 
 WhitelistLayout:GetPropertyChangedSignal(
     "AbsoluteContentSize"
