@@ -1747,112 +1747,76 @@ end
 --==============================================================
 
 local function GetAdaptiveOffset(TargetRoot)
-    local CurrentCamera =
-        workspace.CurrentCamera
+    local CurrentCamera = workspace.CurrentCamera
 
-    if not CurrentCamera
-        or not TargetRoot then
-
+    if not CurrentCamera or not TargetRoot then
         return Config.AimOffset
     end
 
     local Character = TargetRoot.Parent
-
     if not Character then
         return Config.AimOffset
     end
 
-    local Head = Character:FindFirstChild("Head")
-
-    -- Use an upper-body anchor rather than the root itself.
-    -- 0 = root/hips, 1 = head. 0.65 keeps the point around
-    -- the upper torso/neck area.
-    local AnchorPosition
-
-    if Head then
-        AnchorPosition =
-            TargetRoot.Position:Lerp(
-                Head.Position,
-                math.clamp(
-                    Config.ThirdPersonAnchor,
-                    0,
-                    1
-                )
-            )
-    else
-        AnchorPosition = TargetRoot.Position
-    end
-
-    local Distance =
-        (
-            AnchorPosition -
-            CurrentCamera.CFrame.Position
-        ).Magnitude
-
-    -- Keep the original 23.5-style distance behavior as the
-    -- baseline, but do not let the correction become extreme.
-    local Adaptive =
-        Config.AimOffset *
-        (
-            Distance /
-            Config.ReferenceDistance
-        )
+    -- Keep AimOffset as a DIRECT vertical offset.
+    -- Increasing AimOffset therefore always moves the camera
+    -- target lower instead of being weakened by distance scaling.
+    local BaseOffset = Config.AimOffset
 
     if not Config.ThirdPersonCorrection then
-        return math.clamp(
-            Adaptive,
-            -100,
-            100
-        )
+        return math.clamp(BaseOffset, -100, 100)
     end
 
-    -- Measure where the actual upper-body anchor currently sits
-    -- on the controller/camera center of the screen. This is what
-    -- prevents close targets from going over the target and far
-    -- targets from dropping underneath it.
+    local Head = Character:FindFirstChild("Head")
+    local Alpha = math.clamp(Config.ThirdPersonAnchor, 0, 1)
+
+    local AnchorPosition = TargetRoot.Position
+
+    if Head then
+        AnchorPosition = TargetRoot.Position:Lerp(Head.Position, Alpha)
+    end
+
     local Viewport = CurrentCamera.ViewportSize
 
     if Viewport.X <= 0 or Viewport.Y <= 0 then
-        return math.clamp(Adaptive, -100, 100)
+        return math.clamp(BaseOffset, -100, 100)
     end
 
     local ScreenPosition, OnScreen =
-        CurrentCamera:WorldToViewportPoint(
-            AnchorPosition
-        )
+        CurrentCamera:WorldToViewportPoint(AnchorPosition)
 
     if not OnScreen or ScreenPosition.Z <= 0 then
-        return math.clamp(Adaptive, -100, 100)
+        return math.clamp(BaseOffset, -100, 100)
     end
 
-    local ScreenCenterY =
-        Viewport.Y * 0.5
+    local ScreenCenterY = Viewport.Y * 0.5
 
-    local VerticalError =
-        ScreenPosition.Y -
-        ScreenCenterY
+    -- Positive error means the anchor is BELOW the screen center.
+    -- To bring it UP, the vertical offset must DECREASE.
+    -- This sign is the important fix for the previous version.
+    local VerticalError = ScreenPosition.Y - ScreenCenterY
 
-    local DistanceScale =
-        math.clamp(
-            Distance / 40,
-            Config.ThirdPersonMinDistanceScale,
-            Config.ThirdPersonMaxDistanceScale
-        )
+    local Distance =
+        (AnchorPosition - CurrentCamera.CFrame.Position).Magnitude
+
+    local DistanceScale = math.clamp(
+        Distance / 40,
+        Config.ThirdPersonMinDistanceScale,
+        Config.ThirdPersonMaxDistanceScale
+    )
 
     local Correction =
-        VerticalError *
+        -VerticalError *
         Config.ThirdPersonCorrectionStrength *
         DistanceScale
 
-    Correction =
-        math.clamp(
-            Correction,
-            -Config.ThirdPersonMaxCorrection,
-            Config.ThirdPersonMaxCorrection
-        )
+    -- Opposite sign: if the anchor is too high on screen,
+    -- increase the offset and look lower; if it is too low,
+    -- decrease the offset and look higher.
+    local CorrectedOffset = BaseOffset + Correction
 
     return math.clamp(
-        Adaptive + Correction,
+        CorrectedOffset,
         -100,
         100
     )
