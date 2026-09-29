@@ -1,3917 +1,2344 @@
---============================================================
+--==============================================================
 -- XENON
--- CONTROLLER CAMERA LOCK + ESP
--- FIXED BODY AIM + LOCAL-Y HEIGHT CORRECTION
---============================================================
+-- CONTROLLER CAMERA LOCK + ESP + WHITELIST
+-- MOBILE RESPONSIVE EDITION
+--==============================================================
 
---============================================================
+--==============================================================
 -- SERVICES
---============================================================
+--==============================================================
 
 local Players = game:GetService("Players")
 local UserInputService = game:GetService("UserInputService")
 local RunService = game:GetService("RunService")
 local HttpService = game:GetService("HttpService")
-local GuiService = game:GetService("GuiService")
 
 local LocalPlayer = Players.LocalPlayer
 local PlayerGui = LocalPlayer:WaitForChild("PlayerGui")
 local Camera = workspace.CurrentCamera
 
---============================================================
--- CLEAN PREVIOUS XENON
---============================================================
+--==============================================================
+-- DUPLICATE EXECUTION CLEANUP
+--==============================================================
 
 if _G.XenonCleanup then
-	pcall(_G.XenonCleanup)
+    pcall(function()
+        _G.XenonCleanup()
+    end)
 end
 
 pcall(function()
-	RunService:UnbindFromRenderStep("XenonCameraLock")
+    RunService:UnbindFromRenderStep("XenonCameraLock")
 end)
 
 local OldGui = PlayerGui:FindFirstChild("Xenon")
 
 if OldGui then
-	OldGui:Destroy()
+    OldGui:Destroy()
 end
 
---============================================================
+--==============================================================
 -- CONFIG
---============================================================
+--==============================================================
 
 local Config = {
+    LockButton = Enum.KeyCode.ButtonY,
 
-	-- Controller lock button
-	LockButton = Enum.KeyCode.ButtonY,
+    CameraMode = "Third Person",
 
-	-- Camera
-	CameraMode = "Third Person",
+    -- 3P offset now starts at 23.5
+    AimOffset = 23.5,
 
-	-- Fixed third-person body aim offset.
-	AimOffset = 23.5,
+    ReferenceDistance = 100,
 
-	-- Prediction
-	-- X = normal
-	-- Y = inverted
-	-- Z = none
-	PredictionX = 0.08,
-	PredictionY = 0.08,
+    Smoothing = 0,
 
-	-- Camera smoothing
-	-- 0 = instant
-	Smoothing = 0,
+    Prediction = 0.08,
 
-	-- Maximum target distance
-	MaxTargetDistance = 500,
+    MaxTargetDistance = 500,
 
-	-- New-lock targeting
-	-- ON  = closest to screen center
-	-- OFF = closest physical player
-	StickyAim = true,
+    StickyAim = true,
 
-	--========================================================
-	-- LOCAL PLAYER ABOVE TARGET CORRECTION
-	--========================================================
-	--
-	-- If LocalPlayer Y > Target Y:
-	--
-	-- Difference = LocalY - TargetY
-	--
-	-- Aim is moved DOWN by:
-	--
-	-- Difference * AboveTargetStrength
-	--
-	-- capped by AboveTargetMaxCorrection.
-	--
-	AboveTargetCorrection = true,
-	AboveTargetStrength = 0.35,
-	AboveTargetMaxCorrection = 20,
+    -- ESP
+    ESPEnabled = false,
+    ESPShowName = true,
+    ESPShowOutline = true,
+    ESPWhitelistCheck = true,
 
-	-- Whitelist
-	AimbotWhitelistSkip = true,
-
-	-- ESP
-	ESPEnabled = false,
-	ESPShowName = true,
-	ESPShowOutline = true,
-	ESPWhitelistCheck = true,
+    -- Aimbot whitelist protection
+    AimbotWhitelistSkip = true,
 }
 
---============================================================
+--==============================================================
 -- STATE
---============================================================
+--==============================================================
 
 local Locked = false
 local LockedTarget = nil
 
-local CurrentTab = "AIM"
-local UIVisible = true
-local Rebinding = false
+local WaitingForButton = false
+local MainVisible = true
+
+local Connections = {}
 
 local ESPObjects = {}
-local PlayerConnections = {}
 
 local Whitelist = {}
 
-local WhitelistFile = "XenonWhitelist.json"
+--==============================================================
+-- WHITELIST STORAGE
+--==============================================================
 
---============================================================
--- COLORS
---============================================================
-
-local COLORS = {
-
-	Background = Color3.fromRGB(8, 8, 8),
-
-	Panel = Color3.fromRGB(15, 15, 15),
-
-	Panel2 = Color3.fromRGB(23, 23, 23),
-
-	White = Color3.fromRGB(245, 245, 245),
-
-	Gray = Color3.fromRGB(145, 145, 145),
-
-	DarkGray = Color3.fromRGB(48, 48, 48),
-
-	Red = Color3.fromRGB(220, 35, 35),
-
-	Black = Color3.fromRGB(0, 0, 0),
-}
-
---============================================================
--- UTILITY
---============================================================
-
-local function Create(className, properties)
-
-	local object = Instance.new(className)
-
-	for property, value in pairs(properties or {}) do
-
-		pcall(function()
-			object[property] = value
-		end)
-
-	end
-
-	return object
-end
-
-local function Round(object, radius)
-
-	local corner = Instance.new("UICorner")
-
-	corner.CornerRadius =
-		UDim.new(0, radius)
-
-	corner.Parent = object
-
-	return corner
-end
-
-local function AddStroke(
-	object,
-	color,
-	transparency,
-	thickness
-)
-
-	local stroke = Instance.new("UIStroke")
-
-	stroke.Color = color
-	stroke.Transparency = transparency or 0
-	stroke.Thickness = thickness or 1
-
-	stroke.Parent = object
-
-	return stroke
-end
-
---============================================================
--- DEVICE
---============================================================
-
-local IsPhone =
-	UserInputService.TouchEnabled
-	and not GuiService:IsTenFootInterface()
-
---============================================================
--- PLAYER HELPERS
---============================================================
-
-local function IsAlive(player)
-
-	if not player then
-		return false
-	end
-
-	local character =
-		player.Character
-
-	if not character then
-		return false
-	end
-
-	local humanoid =
-		character:FindFirstChildOfClass(
-			"Humanoid"
-		)
-
-	local root =
-		character:FindFirstChild(
-			"HumanoidRootPart"
-		)
-
-	return
-		humanoid ~= nil
-		and root ~= nil
-		and humanoid.Health > 0
-end
-
-local function GetLocalRoot()
-
-	local character =
-		LocalPlayer.Character
-
-	if not character then
-		return nil
-	end
-
-	return character:FindFirstChild(
-		"HumanoidRootPart"
-	)
-end
-
---============================================================
--- WHITELIST
---============================================================
-
-local function IsWhitelisted(player)
-
-	if not player then
-		return false
-	end
-
-	return Whitelist[
-		tostring(player.UserId)
-	] == true
-end
-
---============================================================
--- LOAD WHITELIST
---============================================================
+local WhitelistFileName = "XenonWhitelist.json"
 
 local function LoadWhitelist()
+    table.clear(Whitelist)
 
-	if not readfile or not isfile then
-		return
-	end
+    if type(isfile) ~= "function" then
+        return
+    end
 
-	local exists = false
+    if type(readfile) ~= "function" then
+        return
+    end
 
-	pcall(function()
+    local Success, Data = pcall(function()
+        if not isfile(WhitelistFileName) then
+            return nil
+        end
 
-		exists =
-			isfile(
-				WhitelistFile
-			)
+        return readfile(WhitelistFileName)
+    end)
 
-	end)
+    if not Success or not Data or Data == "" then
+        return
+    end
 
-	if not exists then
-		return
-	end
+    local DecodeSuccess, Decoded = pcall(function()
+        return HttpService:JSONDecode(Data)
+    end)
 
-	local content
+    if not DecodeSuccess or type(Decoded) ~= "table" then
+        return
+    end
 
-	pcall(function()
+    for _, UserId in ipairs(Decoded) do
+        local NumberId = tonumber(UserId)
 
-		content =
-			readfile(
-				WhitelistFile
-			)
-
-	end)
-
-	if not content then
-		return
-	end
-
-	local success, data =
-		pcall(function()
-
-			return HttpService:JSONDecode(
-				content
-			)
-
-		end)
-
-	if not success then
-		return
-	end
-
-	if type(data) ~= "table" then
-		return
-	end
-
-	for _, userId in ipairs(data) do
-
-		Whitelist[
-			tostring(userId)
-		] = true
-
-	end
+        if NumberId then
+            Whitelist[NumberId] = true
+        end
+    end
 end
 
---============================================================
--- SAVE WHITELIST
---============================================================
-
 local function SaveWhitelist()
+    if type(writefile) ~= "function" then
+        return
+    end
 
-	if not writefile then
-		return
-	end
+    local Data = {}
 
-	local list = {}
+    for UserId, IsWhitelisted in pairs(Whitelist) do
+        if IsWhitelisted then
+            table.insert(Data, tonumber(UserId))
+        end
+    end
 
-	for userId, enabled in pairs(
-		Whitelist
-	) do
-
-		if enabled then
-
-			table.insert(
-				list,
-				tonumber(userId)
-			)
-
-		end
-	end
-
-	local success, encoded =
-		pcall(function()
-
-			return HttpService:JSONEncode(
-				list
-			)
-
-		end)
-
-	if not success then
-		return
-	end
-
-	pcall(function()
-
-		writefile(
-			WhitelistFile,
-			encoded
-		)
-
-	end)
+    pcall(function()
+        writefile(
+            WhitelistFileName,
+            HttpService:JSONEncode(Data)
+        )
+    end)
 end
 
 LoadWhitelist()
 
---============================================================
--- PREDICTION
---============================================================
+local function IsWhitelisted(Player)
+    if not Player then
+        return false
+    end
 
-local function GetPredictedPosition(
-	position,
-	velocity
-)
-
-	-- X = normal prediction
-	local X =
-		position.X +
-		(
-			velocity.X *
-			Config.PredictionX
-		)
-
-	-- Y = inverted prediction
-	local Y =
-		position.Y -
-		(
-			velocity.Y *
-			Config.PredictionY
-		)
-
-	-- Z = no prediction
-	local Z =
-		position.Z
-
-	return Vector3.new(
-		X,
-		Y,
-		Z
-	)
+    return Whitelist[Player.UserId] == true
 end
 
---============================================================
--- THIRD PERSON AIM PART
---============================================================
+local function SetWhitelist(Player, State)
+    if not Player then
+        return
+    end
 
-local function GetThirdPersonAimPart(
-	character
-)
+    if State then
+        Whitelist[Player.UserId] = true
+    else
+        Whitelist[Player.UserId] = nil
+    end
 
-	-- R15
-	local upperTorso =
-		character:FindFirstChild(
-			"UpperTorso"
-		)
-
-	if upperTorso then
-		return upperTorso
-	end
-
-	-- R6
-	local torso =
-		character:FindFirstChild(
-			"Torso"
-		)
-
-	if torso then
-		return torso
-	end
-
-	-- Fallback
-	return character:FindFirstChild(
-		"HumanoidRootPart"
-	)
+    SaveWhitelist()
 end
 
---============================================================
--- LOCAL-Y CORRECTION
---============================================================
+--==============================================================
+-- CONNECTION HELPERS
+--==============================================================
 
-local function ApplyHeightCorrection(
-	aimPosition,
-	targetPosition
-)
+local function DisconnectAll()
+    for _, Connection in ipairs(Connections) do
+        pcall(function()
+            Connection:Disconnect()
+        end)
+    end
 
-	if not Config.AboveTargetCorrection then
-		return aimPosition
-	end
-
-	local localRoot =
-		GetLocalRoot()
-
-	if not localRoot then
-		return aimPosition
-	end
-
-	--========================================================
-	-- IMPORTANT
-	--========================================================
-	--
-	-- Only correct if the LOCAL PLAYER is physically higher
-	-- than the target.
-	--
-	-- Example:
-	--
-	-- Local Y = 120
-	-- Target Y = 110
-	--
-	-- Difference = 10
-	--
-	-- Correction = 10 * 0.35 = 3.5 studs DOWN
-	--
-	-- This correction does NOT depend on distance.
-	--========================================================
-
-	local localY =
-		localRoot.Position.Y
-
-	local targetY =
-		targetPosition.Y
-
-	local difference =
-		localY - targetY
-
-	if difference <= 0 then
-		return aimPosition
-	end
-
-	local correction =
-		difference *
-		Config.AboveTargetStrength
-
-	correction =
-		math.clamp(
-			correction,
-			0,
-			Config.AboveTargetMaxCorrection
-		)
-
-	-- Move aim DOWN.
-	return aimPosition -
-		Vector3.new(
-			0,
-			correction,
-			0
-		)
+    table.clear(Connections)
 end
 
---============================================================
--- FIRST PERSON AIM
---============================================================
+local function Connect(Signal, Callback)
+    local Connection = Signal:Connect(Callback)
 
-local function GetFirstPersonAimPosition(
-	player
-)
+    table.insert(
+        Connections,
+        Connection
+    )
 
-	local character =
-		player.Character
-
-	if not character then
-		return nil
-	end
-
-	local head =
-		character:FindFirstChild(
-			"Head"
-		)
-
-	if not head then
-		return nil
-	end
-
-	local predicted =
-		GetPredictedPosition(
-			head.Position,
-			head.AssemblyLinearVelocity
-		)
-
-	return predicted
+    return Connection
 end
 
---============================================================
--- THIRD PERSON AIM
---============================================================
-
-local function GetThirdPersonAimPosition(
-	player
-)
-
-	local character =
-		player.Character
-
-	if not character then
-		return nil
-	end
-
-	local aimPart =
-		GetThirdPersonAimPart(
-			character
-		)
-
-	if not aimPart then
-		return nil
-	end
-
-	-- Predict the body part itself.
-	local predicted =
-		GetPredictedPosition(
-			aimPart.Position,
-			aimPart.AssemblyLinearVelocity
-		)
-
-	-- Fixed 23.5-stud downward third-person offset.
-	-- No distance-based scaling and no camera-height correction.
-	local aimPosition =
-		predicted -
-		Vector3.new(
-			0,
-			Config.AimOffset,
-			0
-		)
-
-	-- Apply local-player-above-target correction AFTER the fixed offset.
-	local corrected =
-		ApplyHeightCorrection(
-			aimPosition,
-			predicted
-		)
-
-	return corrected
-end
-
---============================================================
--- FINAL AIM POSITION
---============================================================
-
-local function GetAimPosition(player)
-
-	if not player then
-		return nil
-	end
-
-	if not IsAlive(player) then
-		return nil
-	end
-
-	if Config.CameraMode ==
-		"First Person"
-	then
-
-		return GetFirstPersonAimPosition(
-			player
-		)
-
-	end
-
-	return GetThirdPersonAimPosition(
-		player
-	)
-end
-
---============================================================
--- TARGET VALIDATION
---============================================================
-
-local function IsValidTarget(player)
-
-	if not player then
-		return false
-	end
-
-	if player == LocalPlayer then
-		return false
-	end
-
-	if
-		Config.AimbotWhitelistSkip
-		and IsWhitelisted(player)
-	then
-
-		return false
-	end
-
-	if not IsAlive(player) then
-		return false
-	end
-
-	local localRoot =
-		GetLocalRoot()
-
-	if not localRoot then
-		return false
-	end
-
-	local character =
-		player.Character
-
-	if not character then
-		return false
-	end
-
-	local root =
-		character:FindFirstChild(
-			"HumanoidRootPart"
-		)
-
-	if not root then
-		return false
-	end
-
-	local distance =
-		(
-			root.Position -
-			localRoot.Position
-		).Magnitude
-
-	if distance >
-		Config.MaxTargetDistance
-	then
-
-		return false
-	end
-
-	return true
-end
-
---============================================================
--- FIND TARGET
---============================================================
-
-local function FindTarget()
-
-	local bestPlayer = nil
-	local bestScore = math.huge
-
-	local localRoot =
-		GetLocalRoot()
-
-	if not localRoot then
-		return nil
-	end
-
-	local viewport =
-		Camera.ViewportSize
-
-	local center =
-		Vector2.new(
-			viewport.X / 2,
-			viewport.Y / 2
-		)
-
-	for _, player in ipairs(
-		Players:GetPlayers()
-	) do
-
-		if IsValidTarget(player) then
-
-			local character =
-				player.Character
-
-			local root =
-				character
-				and character:FindFirstChild(
-					"HumanoidRootPart"
-				)
-
-			if root then
-
-				if Config.StickyAim then
-
-					local screenPosition,
-						visible =
-						Camera:WorldToViewportPoint(
-							root.Position
-						)
-
-					if visible then
-
-						local screenDistance =
-							(
-								Vector2.new(
-									screenPosition.X,
-									screenPosition.Y
-								)
-								-
-								center
-							).Magnitude
-
-						if screenDistance <
-							bestScore
-						then
-
-							bestScore =
-								screenDistance
-
-							bestPlayer =
-								player
-						end
-					end
-
-				else
-
-					local physicalDistance =
-						(
-							root.Position -
-							localRoot.Position
-						).Magnitude
-
-					if physicalDistance <
-						bestScore
-					then
-
-						bestScore =
-							physicalDistance
-
-						bestPlayer =
-							player
-					end
-				end
-			end
-		end
-	end
-
-	return bestPlayer
-end
-
---============================================================
--- UNLOCK
---============================================================
-
-local function Unlock()
-
-	Locked = false
-	LockedTarget = nil
-end
-
---============================================================
--- LOCK
---============================================================
-
-local function LockTarget(
-	target
-)
-
-	if not target then
-		return
-	end
-
-	if not IsValidTarget(target) then
-		return
-	end
-
-	LockedTarget =
-		target
-
-	Locked = true
-end
-
---============================================================
--- TOGGLE LOCK
---============================================================
-
-local function ToggleLock()
-
-	if Rebinding then
-		return
-	end
-
-	if Locked then
-
-		Unlock()
-
-		return
-	end
-
-	local target =
-		FindTarget()
-
-	if target then
-
-		LockTarget(
-			target
-		)
-
-	end
-end
-
---============================================================
+--==============================================================
 -- GUI
---============================================================
+--==============================================================
 
-local Gui = Create(
-	"ScreenGui",
-	{
+local ScreenGui = Instance.new("ScreenGui")
+ScreenGui.Name = "Xenon"
+ScreenGui.ResetOnSpawn = false
+ScreenGui.IgnoreGuiInset = false
+ScreenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+ScreenGui.Parent = PlayerGui
 
-		Name = "Xenon",
+--==============================================================
+-- COLORS
+--==============================================================
 
-		Parent = PlayerGui,
+local BLACK = Color3.fromRGB(8, 8, 8)
+local DARK = Color3.fromRGB(14, 14, 14)
+local DARKER = Color3.fromRGB(20, 20, 20)
+local LIGHT_DARK = Color3.fromRGB(30, 30, 30)
 
-		ResetOnSpawn = false,
+local WHITE = Color3.fromRGB(245, 245, 245)
+local GRAY = Color3.fromRGB(150, 150, 150)
 
-		IgnoreGuiInset = true,
+local RED = Color3.fromRGB(220, 40, 40)
+local DARK_RED = Color3.fromRGB(110, 25, 25)
 
-		ZIndexBehavior =
-			Enum.ZIndexBehavior.Global,
+--==============================================================
+-- MAIN FRAME
+--==============================================================
 
-		DisplayOrder = 1000000,
+local MainFrame = Instance.new("Frame")
+MainFrame.Name = "MainFrame"
+MainFrame.AnchorPoint = Vector2.new(0.5, 0.5)
+MainFrame.Position = UDim2.fromScale(0.5, 0.5)
+MainFrame.BackgroundColor3 = BLACK
+MainFrame.BorderSizePixel = 0
+MainFrame.Visible = true
+MainFrame.ZIndex = 10
+MainFrame.Parent = ScreenGui
 
-		Enabled = true,
-	}
-)
+local MainCorner = Instance.new("UICorner")
+MainCorner.CornerRadius = UDim.new(0, 14)
+MainCorner.Parent = MainFrame
 
---============================================================
--- RESPONSIVE SIZE
---============================================================
+local MainStroke = Instance.new("UIStroke")
+MainStroke.Color = Color3.fromRGB(45, 45, 45)
+MainStroke.Thickness = 1
+MainStroke.Parent = MainFrame
 
-local viewport =
-	Camera.ViewportSize
-
-local screenWidth =
-	viewport.X
-
-local screenHeight =
-	viewport.Y
-
-local WindowWidth
-local WindowHeight
-
-if IsPhone then
-
-	-- Compact controller-phone layout.
-	WindowWidth =
-		math.min(
-			270,
-			math.max(
-				235,
-				screenWidth - 20
-			)
-		)
-
-	WindowHeight =
-		math.min(
-			315,
-			math.max(
-				270,
-				screenHeight - 20
-			)
-		)
-
-else
-
-	WindowWidth = 380
-	WindowHeight = 520
-
-end
-
---============================================================
--- MAIN
---============================================================
-
-local Main = Create(
-	"Frame",
-	{
-
-		Name = "Main",
-
-		Parent = Gui,
-
-		Size =
-			UDim2.fromOffset(
-				WindowWidth,
-				WindowHeight
-			),
-
-		Position =
-			UDim2.new(
-				0.5,
-				-WindowWidth / 2,
-				0.5,
-				-WindowHeight / 2
-			),
-
-		BackgroundColor3 =
-			COLORS.Background,
-
-		BorderSizePixel = 0,
-
-		ClipsDescendants = true,
-
-		ZIndex = 100,
-	}
-)
-
-Round(
-	Main,
-	IsPhone and 12 or 14
-)
-
-AddStroke(
-	Main,
-	COLORS.DarkGray,
-	0.15,
-	1
-)
-
---============================================================
--- DIMENSIONS
---============================================================
-
-local TopHeight =
-	IsPhone and 34 or 42
-
-local TabHeight =
-	IsPhone and 29 or 36
-
-local PageTop =
-	IsPhone and 70 or 91
-
---============================================================
+--==============================================================
 -- TOP BAR
---============================================================
+--==============================================================
 
-local TopBar = Create(
-	"Frame",
-	{
+local TopBar = Instance.new("Frame")
+TopBar.Name = "TopBar"
+TopBar.BackgroundColor3 = DARK
+TopBar.BorderSizePixel = 0
+TopBar.Size = UDim2.new(1, 0, 0, 58)
+TopBar.ZIndex = 11
+TopBar.Parent = MainFrame
 
-		Parent = Main,
+local TopCorner = Instance.new("UICorner")
+TopCorner.CornerRadius = UDim.new(0, 14)
+TopCorner.Parent = TopBar
 
-		Size =
-			UDim2.new(
-				1,
-				-10,
-				0,
-				TopHeight
-			),
+local TopBottom = Instance.new("Frame")
+TopBottom.BackgroundColor3 = DARK
+TopBottom.BorderSizePixel = 0
+TopBottom.Position = UDim2.new(0, 0, 1, -14)
+TopBottom.Size = UDim2.new(1, 0, 0, 14)
+TopBottom.ZIndex = 11
+TopBottom.Parent = TopBar
 
-		Position =
-			UDim2.fromOffset(
-				5,
-				5
-			),
-
-		BackgroundColor3 =
-			COLORS.Panel,
-
-		BorderSizePixel = 0,
-
-		ZIndex = 101,
-	}
-)
-
-Round(
-	TopBar,
-	IsPhone and 8 or 10
-)
-
---============================================================
+--==============================================================
 -- TITLE
---============================================================
+--==============================================================
 
-Create(
-	"TextLabel",
-	{
+local Title = Instance.new("TextLabel")
+Title.BackgroundTransparency = 1
+Title.Position = UDim2.new(0, 18, 0, 7)
+Title.Size = UDim2.new(1, -80, 0, 25)
+Title.Font = Enum.Font.GothamBold
+Title.Text = "XENON"
+Title.TextColor3 = WHITE
+Title.TextSize = 21
+Title.TextXAlignment = Enum.TextXAlignment.Left
+Title.ZIndex = 12
+Title.Parent = TopBar
 
-		Parent = TopBar,
+local Subtitle = Instance.new("TextLabel")
+Subtitle.BackgroundTransparency = 1
+Subtitle.Position = UDim2.new(0, 19, 0, 32)
+Subtitle.Size = UDim2.new(1, -80, 0, 17)
+Subtitle.Font = Enum.Font.Gotham
+Subtitle.Text = "CONTROLLER CAMERA LOCK"
+Subtitle.TextColor3 = GRAY
+Subtitle.TextSize = 9
+Subtitle.TextXAlignment = Enum.TextXAlignment.Left
+Subtitle.ZIndex = 12
+Subtitle.Parent = TopBar
 
-		Size =
-			UDim2.new(
-				1,
-				-55,
-				1,
-				0
-			),
-
-		Position =
-			UDim2.fromOffset(
-				IsPhone and 8 or 13,
-				0
-			),
-
-		BackgroundTransparency = 1,
-
-		Text = "XENON",
-
-		Font =
-			Enum.Font.GothamBold,
-
-		TextSize =
-			IsPhone and 12 or 16,
-
-		TextColor3 =
-			COLORS.White,
-
-		TextXAlignment =
-			Enum.TextXAlignment.Left,
-
-		ZIndex = 102,
-	}
-)
-
-local Status = Create(
-	"TextLabel",
-	{
-
-		Parent = TopBar,
-
-		Size =
-			UDim2.fromOffset(
-				IsPhone and 42 or 60,
-				18
-			),
-
-		Position =
-			UDim2.new(
-				1,
-				IsPhone and -73 or -92,
-				0.5,
-				-9
-			),
-
-		BackgroundTransparency = 1,
-
-		Text = "READY",
-
-		Font =
-			Enum.Font.GothamBold,
-
-		TextSize =
-			IsPhone and 7 or 9,
-
-		TextColor3 =
-			COLORS.Gray,
-
-		ZIndex = 102,
-	}
-)
-
---============================================================
+--==============================================================
 -- CLOSE
---============================================================
+--==============================================================
 
-local Close = Create(
-	"TextButton",
-	{
+local CloseButton = Instance.new("TextButton")
+CloseButton.AnchorPoint = Vector2.new(1, 0.5)
+CloseButton.Position = UDim2.new(1, -12, 0.5, 0)
+CloseButton.Size = UDim2.fromOffset(32, 32)
+CloseButton.BackgroundColor3 = DARKER
+CloseButton.BorderSizePixel = 0
+CloseButton.Text = "×"
+CloseButton.TextColor3 = WHITE
+CloseButton.TextSize = 24
+CloseButton.Font = Enum.Font.GothamBold
+CloseButton.AutoButtonColor = false
+CloseButton.ZIndex = 20
+CloseButton.Parent = TopBar
 
-		Parent = TopBar,
+local CloseCorner = Instance.new("UICorner")
+CloseCorner.CornerRadius = UDim.new(0, 8)
+CloseCorner.Parent = CloseButton
 
-		Size =
-			UDim2.fromOffset(
-				IsPhone and 24 or 31,
-				IsPhone and 24 or 31
-			),
+--==============================================================
+-- SCROLL
+--==============================================================
 
-		Position =
-			UDim2.new(
-				1,
-				IsPhone and -28 or -36,
-				0.5,
-				IsPhone and -12 or -15.5
-			),
+local Scroll = Instance.new("ScrollingFrame")
+Scroll.Name = "Scroll"
+Scroll.BackgroundTransparency = 1
+Scroll.BorderSizePixel = 0
+Scroll.Position = UDim2.new(0, 10, 0, 66)
+Scroll.Size = UDim2.new(1, -20, 1, -76)
+Scroll.CanvasSize = UDim2.fromOffset(0, 1200)
+Scroll.ScrollBarThickness = 3
+Scroll.ScrollBarImageColor3 = RED
+Scroll.ScrollingDirection = Enum.ScrollingDirection.Y
+Scroll.ZIndex = 11
+Scroll.Parent = MainFrame
 
-		BackgroundColor3 =
-			COLORS.Panel2,
+local Padding = Instance.new("UIPadding")
+Padding.PaddingLeft = UDim.new(0, 5)
+Padding.PaddingRight = UDim.new(0, 5)
+Padding.PaddingTop = UDim.new(0, 3)
+Padding.PaddingBottom = UDim.new(0, 12)
+Padding.Parent = Scroll
 
-		BorderSizePixel = 0,
+local Layout = Instance.new("UIListLayout")
+Layout.Padding = UDim.new(0, 8)
+Layout.SortOrder = Enum.SortOrder.LayoutOrder
+Layout.Parent = Scroll
 
-		Text = "×",
+--==============================================================
+-- MOBILE RESPONSIVE
+--==============================================================
 
-		Font =
-			Enum.Font.GothamBold,
+local IsMobile = false
 
-		TextSize =
-			IsPhone and 15 or 20,
+local function UpdateResponsiveState()
+    local Viewport = Camera.ViewportSize
 
-		TextColor3 =
-			COLORS.White,
+    IsMobile = Viewport.X <= 600
 
-		AutoButtonColor = false,
+    if Viewport.X <= 600 then
+        MainFrame.Size = UDim2.fromOffset(
+            math.max(
+                260,
+                math.min(
+                    275,
+                    Viewport.X - 20
+                )
+            ),
+            math.max(
+                390,
+                math.min(
+                    440,
+                    Viewport.Y - 30
+                )
+            )
+        )
 
-		ZIndex = 103,
-	}
-)
+        TopBar.Size = UDim2.new(1, 0, 0, 50)
 
-Round(
-	Close,
-	IsPhone and 7 or 9
-)
+        Scroll.Position =
+            UDim2.new(0, 8, 0, 57)
 
---============================================================
--- TABS
---============================================================
+        Scroll.Size =
+            UDim2.new(1, -16, 1, -65)
 
-local TabBar = Create(
-	"Frame",
-	{
+        Title.TextSize = 17
+        Title.Position =
+            UDim2.new(0, 14, 0, 5)
 
-		Parent = Main,
+        Subtitle.TextSize = 7
+        Subtitle.Position =
+            UDim2.new(0, 15, 0, 28)
 
-		Size =
-			UDim2.new(
-				1,
-				-12,
-				0,
-				TabHeight
-			),
+        CloseButton.Size =
+            UDim2.fromOffset(28, 28)
 
-		Position =
-			UDim2.fromOffset(
-				6,
-				TopHeight + 10
-			),
+        CloseButton.Position =
+            UDim2.new(1, -9, 0.5, 0)
 
-		BackgroundColor3 =
-			COLORS.Panel,
+        Padding.PaddingLeft =
+            UDim.new(0, 3)
 
-		BorderSizePixel = 0,
+        Padding.PaddingRight =
+            UDim.new(0, 3)
 
-		ZIndex = 101,
-	}
-)
+    elseif Viewport.X <= 1000 then
+        MainFrame.Size =
+            UDim2.fromOffset(320, 490)
 
-Round(
-	TabBar,
-	IsPhone and 8 or 10
-)
+        TopBar.Size =
+            UDim2.new(1, 0, 0, 54)
 
-Create(
-	"UIPadding",
-	{
+        Scroll.Position =
+            UDim2.new(0, 9, 0, 62)
 
-		Parent = TabBar,
+        Scroll.Size =
+            UDim2.new(1, -18, 1, -70)
 
-		PaddingLeft =
-			UDim.new(0, 3),
+        Title.TextSize = 19
 
-		PaddingRight =
-			UDim.new(0, 3),
+        Subtitle.TextSize = 8
 
-		PaddingTop =
-			UDim.new(0, 3),
+        CloseButton.Size =
+            UDim2.fromOffset(30, 30)
 
-		PaddingBottom =
-			UDim.new(0, 3),
-	}
-)
+        Padding.PaddingLeft =
+            UDim.new(0, 4)
 
-Create(
-	"UIListLayout",
-	{
+        Padding.PaddingRight =
+            UDim.new(0, 4)
 
-		Parent = TabBar,
+    else
+        MainFrame.Size =
+            UDim2.fromOffset(390, 570)
 
-		FillDirection =
-			Enum.FillDirection.Horizontal,
+        TopBar.Size =
+            UDim2.new(1, 0, 0, 58)
 
-		HorizontalAlignment =
-			Enum.HorizontalAlignment.Center,
+        Scroll.Position =
+            UDim2.new(0, 10, 0, 66)
 
-		VerticalAlignment =
-			Enum.VerticalAlignment.Center,
+        Scroll.Size =
+            UDim2.new(1, -20, 1, -76)
 
-		Padding =
-			UDim.new(
-				0,
-				2
-			),
+        Title.TextSize = 21
 
-		SortOrder =
-			Enum.SortOrder.LayoutOrder,
-	}
-)
+        Subtitle.TextSize = 9
 
-local TabButtons = {}
+        CloseButton.Size =
+            UDim2.fromOffset(32, 32)
 
-local function CreateTab(
-	name,
-	order
-)
+        Padding.PaddingLeft =
+            UDim.new(0, 5)
 
-	local tabWidth =
-		math.floor(
-			(WindowWidth - 28) / 3
-		)
-
-	local button = Create(
-		"TextButton",
-		{
-
-			Parent = TabBar,
-
-			Size =
-				UDim2.fromOffset(
-					tabWidth,
-					TabHeight - 6
-				),
-
-			BackgroundColor3 =
-				COLORS.Panel2,
-
-			BorderSizePixel = 0,
-
-			Text = name,
-
-			Font =
-				Enum.Font.GothamBold,
-
-			TextSize =
-				IsPhone and 7 or 9,
-
-			TextColor3 =
-				COLORS.Gray,
-
-			AutoButtonColor = false,
-
-			LayoutOrder = order,
-
-			ZIndex = 102,
-		}
-	)
-
-	Round(
-		button,
-		IsPhone and 6 or 8
-	)
-
-	local indicator = Create(
-		"Frame",
-		{
-
-			Parent = button,
-
-			Size =
-				UDim2.new(
-					1,
-					-10,
-					0,
-					2
-				),
-
-			Position =
-				UDim2.new(
-					0,
-					5,
-					1,
-					-4
-				),
-
-			BackgroundColor3 =
-				COLORS.White,
-
-			BorderSizePixel = 0,
-
-			Visible = false,
-
-			ZIndex = 103,
-		}
-	)
-
-	Round(
-		indicator,
-		2
-	)
-
-	TabButtons[name] = {
-		Button = button,
-		Indicator = indicator,
-	}
-
-	return button
+        Padding.PaddingRight =
+            UDim.new(0, 5)
+    end
 end
 
-CreateTab("AIM", 1)
-CreateTab("ESP", 2)
-CreateTab("WHITELIST", 3)
+--==============================================================
+-- FLOATING BUTTON
+--==============================================================
 
---============================================================
--- PAGES
---============================================================
+local FloatingToggle = Instance.new("TextButton")
+FloatingToggle.Name = "FloatingToggle"
+FloatingToggle.AnchorPoint = Vector2.new(1, 0)
+FloatingToggle.Position =
+    UDim2.new(1, -10, 0, 10)
 
-local Pages = Create(
-	"Frame",
-	{
+FloatingToggle.Size =
+    UDim2.fromOffset(42, 42)
 
-		Parent = Main,
+FloatingToggle.BackgroundColor3 = BLACK
+FloatingToggle.BorderSizePixel = 0
+FloatingToggle.Text = "X"
+FloatingToggle.TextColor3 = WHITE
+FloatingToggle.TextSize = 18
+FloatingToggle.Font = Enum.Font.GothamBold
+FloatingToggle.AutoButtonColor = false
+FloatingToggle.ZIndex = 100
+FloatingToggle.Parent = ScreenGui
 
-		Size =
-			UDim2.new(
-				1,
-				-12,
-				1,
-				-(PageTop + 5)
-			),
+local FloatingCorner = Instance.new("UICorner")
+FloatingCorner.CornerRadius = UDim.new(0, 10)
+FloatingCorner.Parent = FloatingToggle
 
-		Position =
-			UDim2.fromOffset(
-				6,
-				PageTop
-			),
+local FloatingStroke = Instance.new("UIStroke")
+FloatingStroke.Color = RED
+FloatingStroke.Thickness = 1.5
+FloatingStroke.Parent = FloatingToggle
 
-		BackgroundTransparency = 1,
+--==============================================================
+-- SECTION
+--==============================================================
 
-		ZIndex = 101,
-	}
-)
+local function CreateSection(Text)
+    local Section = Instance.new("TextLabel")
 
-local function CreatePage()
+    Section.BackgroundTransparency = 1
+    Section.Size =
+        UDim2.new(1, 0, 0, 20)
 
-	local page = Create(
-		"ScrollingFrame",
-		{
+    Section.Font =
+        Enum.Font.GothamBold
 
-			Parent = Pages,
+    Section.Text = Text
+    Section.TextColor3 = RED
+    Section.TextSize = IsMobile and 10 or 11
 
-			Size =
-				UDim2.fromScale(
-					1,
-					1
-				),
+    Section.TextXAlignment =
+        Enum.TextXAlignment.Left
 
-			BackgroundTransparency = 1,
+    Section.ZIndex = 12
+    Section.Parent = Scroll
 
-			BorderSizePixel = 0,
-
-			ScrollBarThickness =
-				IsPhone and 2 or 3,
-
-			ScrollBarImageColor3 =
-				COLORS.Red,
-
-			CanvasSize =
-				UDim2.new(
-					0,
-					0,
-					0,
-					0
-				),
-
-			AutomaticCanvasSize =
-				Enum.AutomaticSize.Y,
-
-			ScrollingDirection =
-				Enum.ScrollingDirection.Y,
-
-			Visible = false,
-
-			ZIndex = 101,
-		}
-	)
-
-	Create(
-		"UIPadding",
-		{
-
-			Parent = page,
-
-			PaddingLeft =
-				UDim.new(
-					0,
-					1
-				),
-
-			PaddingRight =
-				UDim.new(
-					0,
-					1
-				),
-
-			PaddingTop =
-				UDim.new(
-					0,
-					1
-				),
-
-			PaddingBottom =
-				UDim.new(
-					0,
-					5
-				),
-		}
-	)
-
-	Create(
-		"UIListLayout",
-		{
-
-			Parent = page,
-
-			Padding =
-				UDim.new(
-					0,
-					IsPhone and 4 or 7
-				),
-
-			SortOrder =
-				Enum.SortOrder.LayoutOrder,
-		}
-	)
-
-	return page
+    return Section
 end
 
-local AimPage =
-	CreatePage()
-
-local ESPPage =
-	CreatePage()
-
-local WhitelistPage =
-	CreatePage()
-
---============================================================
--- UI HELPERS
---============================================================
-
-local function CreateSection(
-	parent,
-	text
-)
-
-	return Create(
-		"TextLabel",
-		{
-
-			Parent = parent,
-
-			Size =
-				UDim2.new(
-					1,
-					-2,
-					0,
-					IsPhone and 15 or 21
-				),
-
-			BackgroundTransparency = 1,
-
-			Text = text,
-
-			Font =
-				Enum.Font.GothamBold,
-
-			TextSize =
-				IsPhone and 7 or 9,
-
-			TextColor3 =
-				COLORS.Red,
-
-			TextXAlignment =
-				Enum.TextXAlignment.Left,
-
-			ZIndex = 102,
-		}
-	)
-end
-
---============================================================
+--==============================================================
 -- ROW
---============================================================
+--==============================================================
 
-local function CreateRow(
-	parent,
-	title,
-	subtitle
-)
+local function CreateRow(Height)
+    local Row = Instance.new("Frame")
 
-	local rowHeight =
-		IsPhone and 34 or 43
+    Row.BackgroundColor3 = DARK
+    Row.BorderSizePixel = 0
 
-	local row = Create(
-		"Frame",
-		{
+    Row.Size =
+        UDim2.new(1, 0, 0, Height)
 
-			Parent = parent,
+    Row.ZIndex = 12
+    Row.Parent = Scroll
 
-			Size =
-				UDim2.new(
-					1,
-					-2,
-					0,
-					rowHeight
-				),
+    local Corner = Instance.new("UICorner")
+    Corner.CornerRadius = UDim.new(0, 8)
+    Corner.Parent = Row
 
-			BackgroundColor3 =
-				COLORS.Panel,
+    local Stroke = Instance.new("UIStroke")
+    Stroke.Color = Color3.fromRGB(35, 35, 35)
+    Stroke.Thickness = 1
+    Stroke.Parent = Row
 
-			BorderSizePixel = 0,
-
-			ZIndex = 102,
-		}
-	)
-
-	Round(
-		row,
-		IsPhone and 7 or 9
-	)
-
-	Create(
-		"TextLabel",
-		{
-
-			Parent = row,
-
-			Size =
-				UDim2.new(
-					1,
-					-88,
-					0,
-					16
-				),
-
-			Position =
-				UDim2.fromOffset(
-					IsPhone and 8 or 10,
-					2
-				),
-
-			BackgroundTransparency = 1,
-
-			Text = title,
-
-			Font =
-				Enum.Font.GothamSemibold,
-
-			TextSize =
-				IsPhone and 8 or 10,
-
-			TextColor3 =
-				COLORS.White,
-
-			TextXAlignment =
-				Enum.TextXAlignment.Left,
-
-			ZIndex = 103,
-		}
-	)
-
-	Create(
-		"TextLabel",
-		{
-
-			Parent = row,
-
-			Size =
-				UDim2.new(
-					1,
-					-88,
-					0,
-					11
-				),
-
-			Position =
-				UDim2.fromOffset(
-					IsPhone and 8 or 10,
-					18
-				),
-
-			BackgroundTransparency = 1,
-
-			Text = subtitle or "",
-
-			Font =
-				Enum.Font.Gotham,
-
-			TextSize =
-				IsPhone and 6 or 7,
-
-			TextColor3 =
-				COLORS.Gray,
-
-			TextXAlignment =
-				Enum.TextXAlignment.Left,
-
-			ZIndex = 103,
-		}
-	)
-
-	return row
+    return Row
 end
 
---============================================================
--- TOGGLE
---============================================================
+--==============================================================
+-- LABEL
+--==============================================================
 
-local function CreateToggle(
-	parent,
-	title,
-	subtitle,
-	initial,
-	callback
-)
+local function CreateLabel(Parent, Text)
+    local Label = Instance.new("TextLabel")
 
-	local row =
-		CreateRow(
-			parent,
-			title,
-			subtitle
-		)
+    Label.BackgroundTransparency = 1
+    Label.Position =
+        UDim2.new(0, 12, 0, 0)
 
-	local button = Create(
-		"TextButton",
-		{
+    Label.Size =
+        UDim2.new(0.55, -12, 1, 0)
 
-			Parent = row,
+    Label.Font =
+        Enum.Font.GothamMedium
 
-			Size =
-				UDim2.fromOffset(
-					IsPhone and 44 or 53,
-					IsPhone and 21 or 25
-				),
+    Label.Text = Text
+    Label.TextColor3 = WHITE
+    Label.TextSize = IsMobile and 11 or 13
 
-			Position =
-				UDim2.new(
-					1,
-					IsPhone and -51 or -62,
-					0.5,
-					IsPhone and -10.5 or -12.5
-				),
+    Label.TextXAlignment =
+        Enum.TextXAlignment.Left
 
-			BackgroundColor3 =
-				initial
-				and COLORS.Red
-				or COLORS.DarkGray,
+    Label.ZIndex = 13
+    Label.Parent = Parent
 
-			BorderSizePixel = 0,
-
-			Text =
-				initial
-				and "ON"
-				or "OFF",
-
-			Font =
-				Enum.Font.GothamBold,
-
-			TextSize =
-				IsPhone and 7 or 8,
-
-			TextColor3 =
-				COLORS.White,
-
-			AutoButtonColor = false,
-
-			ZIndex = 104,
-		}
-	)
-
-	Round(
-		button,
-		IsPhone and 6 or 8
-	)
-
-	local state =
-		initial
-
-	local function Update(
-		value
-	)
-
-		state = value
-
-		button.Text =
-			value
-			and "ON"
-			or "OFF"
-
-		button.BackgroundColor3 =
-			value
-			and COLORS.Red
-			or COLORS.DarkGray
-
-		if callback then
-			callback(value)
-		end
-	end
-
-	button.Activated:Connect(
-		function()
-
-			Update(
-				not state
-			)
-
-		end
-	)
-
-	return row
+    return Label
 end
 
---============================================================
--- TEXT BOX
---============================================================
+--==============================================================
+-- CAMERA SECTION
+--==============================================================
 
-local function CreateTextBox(
-	parent,
-	title,
-	subtitle,
-	value,
-	callback
+CreateSection("CAMERA")
+
+local CameraRow = CreateRow(42)
+
+CreateLabel(
+    CameraRow,
+    "Camera Mode"
 )
 
-	local row =
-		CreateRow(
-			parent,
-			title,
-			subtitle
-		)
+local CameraButton = Instance.new("TextButton")
 
-	local box = Create(
-		"TextBox",
-		{
+CameraButton.AnchorPoint =
+    Vector2.new(1, 0.5)
 
-			Parent = row,
+CameraButton.Position =
+    UDim2.new(1, -8, 0.5, 0)
 
-			Size =
-				UDim2.fromOffset(
-					IsPhone and 52 or 70,
-					IsPhone and 21 or 26
-				),
+CameraButton.Size =
+    UDim2.new(0.42, 0, 0, 30)
 
-			Position =
-				UDim2.new(
-					1,
-					IsPhone and -60 or -80,
-					0.5,
-					IsPhone and -10.5 or -13
-				),
+CameraButton.BackgroundColor3 = DARKER
+CameraButton.BorderSizePixel = 0
+CameraButton.Text = Config.CameraMode
+CameraButton.TextColor3 = WHITE
+CameraButton.TextSize = IsMobile and 10 or 12
+CameraButton.Font = Enum.Font.GothamMedium
+CameraButton.AutoButtonColor = false
+CameraButton.ZIndex = 13
+CameraButton.Parent = CameraRow
 
-			BackgroundColor3 =
-				COLORS.Panel2,
+local CameraCorner = Instance.new("UICorner")
+CameraCorner.CornerRadius = UDim.new(0, 6)
+CameraCorner.Parent = CameraButton
 
-			BorderSizePixel = 0,
+local CameraOptions = Instance.new("Frame")
 
-			Text =
-				tostring(value),
+CameraOptions.Visible = false
+CameraOptions.AnchorPoint =
+    Vector2.new(1, 0)
 
-			Font =
-				Enum.Font.GothamSemibold,
+CameraOptions.Position =
+    UDim2.new(1, -8, 1, 3)
 
-			TextSize =
-				IsPhone and 7 or 9,
+CameraOptions.Size =
+    UDim2.new(0.42, 0, 0, 62)
 
-			TextColor3 =
-				COLORS.White,
+CameraOptions.BackgroundColor3 = DARKER
+CameraOptions.BorderSizePixel = 0
+CameraOptions.ZIndex = 50
+CameraOptions.Parent = CameraRow
 
-			ClearTextOnFocus = false,
+local CameraOptionsCorner = Instance.new("UICorner")
+CameraOptionsCorner.CornerRadius = UDim.new(0, 6)
+CameraOptionsCorner.Parent = CameraOptions
 
-			TextXAlignment =
-				Enum.TextXAlignment.Center,
+local CameraOptionLayout = Instance.new("UIListLayout")
+CameraOptionLayout.Parent = CameraOptions
 
-			ZIndex = 104,
-		}
-	)
+local function CreateCameraOption(Text)
+    local Option = Instance.new("TextButton")
 
-	Round(
-		box,
-		IsPhone and 6 or 8
-	)
+    Option.Size =
+        UDim2.new(1, 0, 0, 31)
 
-	AddStroke(
-		box,
-		COLORS.DarkGray,
-		0.25,
-		1
-	)
+    Option.BackgroundTransparency = 1
+    Option.BorderSizePixel = 0
+    Option.Text = Text
+    Option.TextColor3 = WHITE
+    Option.TextSize = IsMobile and 9 or 11
+    Option.Font = Enum.Font.Gotham
+    Option.AutoButtonColor = false
+    Option.ZIndex = 51
+    Option.Parent = CameraOptions
 
-	box.FocusLost:Connect(
-		function()
+    Option.Activated:Connect(function()
+        Config.CameraMode = Text
+        CameraButton.Text = Text
+        CameraOptions.Visible = false
+    end)
 
-			local number =
-				tonumber(
-					box.Text
-				)
-
-			if number then
-
-				callback(number)
-
-				box.Text =
-					tostring(number)
-
-			else
-
-				box.Text =
-					tostring(value)
-
-			end
-		end
-	)
-
-	return row
+    return Option
 end
 
---============================================================
--- DROPDOWN
---============================================================
+CreateCameraOption("First Person")
+CreateCameraOption("Third Person")
 
-local function CreateDropdown(
-	parent,
-	title,
-	subtitle,
-	options,
-	current,
-	callback
-)
+CameraButton.Activated:Connect(function()
+    CameraOptions.Visible =
+        not CameraOptions.Visible
+end)
 
-	local row =
-		CreateRow(
-			parent,
-			title,
-			subtitle
-		)
+--==============================================================
+-- AIM SETTINGS
+--==============================================================
 
-	local button = Create(
-		"TextButton",
-		{
+CreateSection("AIM SETTINGS")
 
-			Parent = row,
+local function CreateInputRow(LabelText, DefaultValue)
+    local Row = CreateRow(44)
 
-			Size =
-				UDim2.fromOffset(
-					IsPhone and 78 or 105,
-					IsPhone and 21 or 26
-				),
+    CreateLabel(Row, LabelText)
 
-			Position =
-				UDim2.new(
-					1,
-					IsPhone and -86 or -115,
-					0.5,
-					IsPhone and -10.5 or -13
-				),
+    local Box = Instance.new("TextBox")
 
-			BackgroundColor3 =
-				COLORS.Panel2,
+    Box.AnchorPoint =
+        Vector2.new(1, 0.5)
 
-			BorderSizePixel = 0,
+    Box.Position =
+        UDim2.new(1, -8, 0.5, 0)
 
-			Text = current,
+    Box.Size =
+        UDim2.new(0.37, 0, 0, 30)
 
-			Font =
-				Enum.Font.GothamSemibold,
+    Box.BackgroundColor3 = DARKER
+    Box.BorderSizePixel = 0
+    Box.ClearTextOnFocus = false
+    Box.Text = tostring(DefaultValue)
+    Box.TextColor3 = WHITE
+    Box.PlaceholderColor3 = GRAY
+    Box.TextSize = IsMobile and 10 or 12
+    Box.Font = Enum.Font.GothamMedium
+    Box.TextXAlignment = Enum.TextXAlignment.Center
+    Box.ZIndex = 13
+    Box.Parent = Row
 
-			TextSize =
-				IsPhone and 6 or 8,
+    local Corner = Instance.new("UICorner")
+    Corner.CornerRadius = UDim.new(0, 6)
+    Corner.Parent = Box
 
-			TextColor3 =
-				COLORS.White,
-
-			AutoButtonColor = false,
-
-			ZIndex = 104,
-		}
-	)
-
-	Round(
-		button,
-		IsPhone and 6 or 8
-	)
-
-	local index = 1
-
-	for i, option in ipairs(
-		options
-	) do
-
-		if option == current then
-
-			index = i
-
-			break
-		end
-	end
-
-	button.Activated:Connect(
-		function()
-
-			index += 1
-
-			if index > #options then
-				index = 1
-			end
-
-			local selected =
-				options[index]
-
-			button.Text =
-				selected
-
-			callback(selected)
-		end
-	)
-
-	return row
+    return Row, Box
 end
 
---============================================================
--- ACTION
---============================================================
+--==============================================================
+-- 3P OFFSET
+--==============================================================
 
-local function CreateAction(
-	parent,
-	title,
-	subtitle,
-	text,
-	callback
+local OffsetRow, OffsetBox =
+    CreateInputRow(
+        "3P Offset",
+        Config.AimOffset
+    )
+
+OffsetBox.FocusLost:Connect(function()
+    local Number = tonumber(OffsetBox.Text)
+
+    if Number then
+        Number =
+            math.clamp(Number, -100, 100)
+
+        Config.AimOffset = Number
+
+        OffsetBox.Text =
+            tostring(Number)
+    else
+        OffsetBox.Text =
+            tostring(Config.AimOffset)
+    end
+end)
+
+--==============================================================
+-- SMOOTHING
+--==============================================================
+
+local SmoothRow, SmoothBox =
+    CreateInputRow(
+        "Smoothing",
+        Config.Smoothing
+    )
+
+SmoothBox.FocusLost:Connect(function()
+    local Number = tonumber(SmoothBox.Text)
+
+    if Number then
+        Number = math.max(0, Number)
+
+        Config.Smoothing = Number
+
+        SmoothBox.Text =
+            tostring(Number)
+    else
+        SmoothBox.Text =
+            tostring(Config.Smoothing)
+    end
+end)
+
+--==============================================================
+-- PREDICTION
+--==============================================================
+
+local PredictionRow, PredictionBox =
+    CreateInputRow(
+        "Prediction",
+        Config.Prediction
+    )
+
+PredictionBox.FocusLost:Connect(function()
+    local Number = tonumber(PredictionBox.Text)
+
+    if Number then
+        Number = math.max(0, Number)
+
+        Config.Prediction = Number
+
+        PredictionBox.Text =
+            tostring(Number)
+    else
+        PredictionBox.Text =
+            tostring(Config.Prediction)
+    end
+end)
+
+--==============================================================
+-- TOGGLE CREATOR
+--==============================================================
+
+local function CreateToggleRow(
+    LabelText,
+    GetValue,
+    SetValue
 )
+    local Row = CreateRow(44)
 
-	local row =
-		CreateRow(
-			parent,
-			title,
-			subtitle
-		)
+    CreateLabel(Row, LabelText)
 
-	local button = Create(
-		"TextButton",
-		{
+    local Button = Instance.new("TextButton")
 
-			Parent = row,
+    Button.AnchorPoint =
+        Vector2.new(1, 0.5)
 
-			Size =
-				UDim2.fromOffset(
-					IsPhone and 72 or 98,
-					IsPhone and 21 or 26
-				),
+    Button.Position =
+        UDim2.new(1, -8, 0.5, 0)
 
-			Position =
-				UDim2.new(
-					1,
-					IsPhone and -80 or -108,
-					0.5,
-					IsPhone and -10.5 or -13
-				),
+    Button.Size =
+        UDim2.fromOffset(58, 28)
 
-			BackgroundColor3 =
-				COLORS.Red,
+    Button.BorderSizePixel = 0
+    Button.TextColor3 = WHITE
+    Button.TextSize = IsMobile and 10 or 11
+    Button.Font = Enum.Font.GothamBold
+    Button.AutoButtonColor = false
+    Button.ZIndex = 13
+    Button.Parent = Row
 
-			BorderSizePixel = 0,
+    local Corner = Instance.new("UICorner")
+    Corner.CornerRadius = UDim.new(0, 7)
+    Corner.Parent = Button
 
-			Text = text,
+    local function Update()
+        if GetValue() then
+            Button.Text = "ON"
+            Button.BackgroundColor3 = RED
+        else
+            Button.Text = "OFF"
+            Button.BackgroundColor3 = DARKER
+        end
+    end
 
-			Font =
-				Enum.Font.GothamBold,
+    Button.Activated:Connect(function()
+        SetValue(not GetValue())
+        Update()
+    end)
 
-			TextSize =
-				IsPhone and 6 or 8,
+    Update()
 
-			TextColor3 =
-				COLORS.White,
-
-			AutoButtonColor = false,
-
-			ZIndex = 104,
-		}
-	)
-
-	Round(
-		button,
-		IsPhone and 6 or 8
-	)
-
-	button.Activated:Connect(
-		callback
-	)
-
-	return row, button
+    return Row, Button
 end
 
---============================================================
--- AIM PAGE
---============================================================
+--==============================================================
+-- STICKY AIM
+--==============================================================
 
-CreateSection(
-	AimPage,
-	"CAMERA"
-)
+local StickyRow, StickyButton =
+    CreateToggleRow(
+        "Sticky Aim",
 
-CreateDropdown(
-	AimPage,
-	"Camera Mode",
-	"First / third person",
-	{
-		"First Person",
-		"Third Person",
-	},
-	Config.CameraMode,
-	function(value)
+        function()
+            return Config.StickyAim
+        end,
 
-		Config.CameraMode =
-			value
+        function(Value)
+            Config.StickyAim = Value
+        end
+    )
 
-	end
-)
+--==============================================================
+-- AIMBOT WHITELIST SKIP
+--==============================================================
 
-CreateTextBox(
-	AimPage,
-	"Aim Offset",
-	"Third-person downward offset",
-	Config.AimOffset,
-	function(value)
+local AimWhitelistRow, AimWhitelistButton =
+    CreateToggleRow(
+        "Whitelist Skip",
 
-		Config.AimOffset =
-			value
+        function()
+            return Config.AimbotWhitelistSkip
+        end,
 
-	end
-)
+        function(Value)
+            Config.AimbotWhitelistSkip = Value
 
-CreateTextBox(
-	AimPage,
-	"Smoothing",
-	"0 = instant",
-	Config.Smoothing,
-	function(value)
+            -- If currently locked onto someone who is
+            -- now protected, immediately unlock.
+            if Value and LockedTarget then
+                if IsWhitelisted(LockedTarget) then
+                    Locked = false
+                    LockedTarget = nil
+                end
+            end
+        end
+    )
 
-		Config.Smoothing =
-			math.max(
-				0,
-				value
-			)
-
-	end
-)
-
-CreateSection(
-	AimPage,
-	"PREDICTION"
-)
-
-CreateTextBox(
-	AimPage,
-	"Prediction X",
-	"Normal X prediction",
-	Config.PredictionX,
-	function(value)
-
-		Config.PredictionX =
-			value
-
-	end
-)
-
-CreateTextBox(
-	AimPage,
-	"Prediction Y",
-	"Inverted Y prediction",
-	Config.PredictionY,
-	function(value)
-
-		Config.PredictionY =
-			value
-
-	end
-)
-
-CreateSection(
-	AimPage,
-	"HEIGHT CORRECTION"
-)
-
-CreateToggle(
-	AimPage,
-	"Local Above Target",
-	"Move aim down when you are higher",
-	Config.AboveTargetCorrection,
-	function(value)
-
-		Config.AboveTargetCorrection =
-			value
-
-	end
-)
-
-CreateTextBox(
-	AimPage,
-	"Correction Strength",
-	"0.35 = 35% of Y difference",
-	Config.AboveTargetStrength,
-	function(value)
-
-		Config.AboveTargetStrength =
-			math.max(
-				0,
-				value
-			)
-
-	end
-)
-
-CreateTextBox(
-	AimPage,
-	"Max Correction",
-	"Maximum downward correction",
-	Config.AboveTargetMaxCorrection,
-	function(value)
-
-		Config.AboveTargetMaxCorrection =
-			math.max(
-				0,
-				value
-			)
-
-	end
-)
-
-CreateSection(
-	AimPage,
-	"TARGETING"
-)
-
-CreateToggle(
-	AimPage,
-	"Sticky Aim",
-	"Screen-center priority on new lock",
-	Config.StickyAim,
-	function(value)
-
-		Config.StickyAim =
-			value
-
-	end
-)
-
-CreateToggle(
-	AimPage,
-	"Whitelist Skip",
-	"Ignore whitelisted players",
-	Config.AimbotWhitelistSkip,
-	function(value)
-
-		Config.AimbotWhitelistSkip =
-			value
-
-		if LockedTarget
-			and IsWhitelisted(
-				LockedTarget
-			)
-		then
-
-			Unlock()
-
-		end
-	end
-)
-
---============================================================
+--==============================================================
 -- CONTROLLER
---============================================================
+--==============================================================
 
-CreateSection(
-	AimPage,
-	"CONTROLLER"
+CreateSection("CONTROLLER")
+
+local LockRow = CreateRow(44)
+
+CreateLabel(
+    LockRow,
+    "Lock Button"
 )
 
-local ControllerInfo
+local LockButtonDisplay = Instance.new("TextLabel")
 
-local LockButtonRow
+LockButtonDisplay.AnchorPoint =
+    Vector2.new(1, 0.5)
 
-LockButtonRow =
-	CreateAction(
-		AimPage,
-		"Lock Button",
-		"Controller only",
-		Config.LockButton.Name,
-		function()
+LockButtonDisplay.Position =
+    UDim2.new(1, -8, 0.5, 0)
 
-			Rebinding = true
+LockButtonDisplay.Size =
+    UDim2.new(0.37, 0, 0, 30)
 
-			if ControllerInfo then
+LockButtonDisplay.BackgroundColor3 =
+    DARKER
 
-				ControllerInfo.Text =
-					"WAITING FOR CONTROLLER INPUT"
+LockButtonDisplay.BorderSizePixel = 0
+LockButtonDisplay.Text =
+    Config.LockButton.Name
 
-			end
-		end
-	)
+LockButtonDisplay.TextColor3 = WHITE
+LockButtonDisplay.TextSize = IsMobile and 8 or 10
+LockButtonDisplay.Font =
+    Enum.Font.GothamBold
 
-ControllerInfo = Create(
-	"TextLabel",
-	{
+LockButtonDisplay.ZIndex = 13
+LockButtonDisplay.Parent = LockRow
 
-		Parent = AimPage,
+local LockCorner = Instance.new("UICorner")
+LockCorner.CornerRadius = UDim.new(0, 6)
+LockCorner.Parent = LockButtonDisplay
 
-		Size =
-			UDim2.new(
-				1,
-				-2,
-				0,
-				IsPhone and 30 or 43
-			),
+local RebindRow = CreateRow(44)
 
-		BackgroundColor3 =
-			COLORS.Panel,
+local RebindButton = Instance.new("TextButton")
 
-		BorderSizePixel = 0,
+RebindButton.Position =
+    UDim2.new(0, 8, 0, 7)
 
-		Text =
-			"LOCK: " ..
-			Config.LockButton.Name,
+RebindButton.Size =
+    UDim2.new(1, -16, 1, -14)
 
-		Font =
-			Enum.Font.Gotham,
+RebindButton.BackgroundColor3 = RED
+RebindButton.BorderSizePixel = 0
+RebindButton.Text = "SET LOCK BUTTON"
+RebindButton.TextColor3 = WHITE
+RebindButton.TextSize = IsMobile and 10 or 12
+RebindButton.Font = Enum.Font.GothamBold
+RebindButton.AutoButtonColor = false
+RebindButton.ZIndex = 13
+RebindButton.Parent = RebindRow
 
-		TextSize =
-			IsPhone and 6 or 8,
+local RebindCorner = Instance.new("UICorner")
+RebindCorner.CornerRadius = UDim.new(0, 7)
+RebindCorner.Parent = RebindButton
 
-		TextColor3 =
-			COLORS.Gray,
+--==============================================================
+-- VISUALS
+--==============================================================
 
-		TextXAlignment =
-			Enum.TextXAlignment.Left,
+CreateSection("VISUALS")
 
-		TextYAlignment =
-			Enum.TextYAlignment.Center,
+local ESPEnabledRow, ESPEnabledButton =
+    CreateToggleRow(
+        "Enabled",
 
-		ZIndex = 102,
-	}
-)
+        function()
+            return Config.ESPEnabled
+        end,
 
-Round(
-	ControllerInfo,
-	IsPhone and 7 or 9
-)
+        function(Value)
+            Config.ESPEnabled = Value
+        end
+    )
 
---============================================================
--- HEIGHT INFO
---============================================================
+local ESPNameRow, ESPNameButton =
+    CreateToggleRow(
+        "Show Name",
 
-local HeightInfo = Create(
-	"TextLabel",
-	{
+        function()
+            return Config.ESPShowName
+        end,
 
-		Parent = AimPage,
+        function(Value)
+            Config.ESPShowName = Value
+        end
+    )
 
-		Size =
-			UDim2.new(
-				1,
-				-2,
-				0,
-				IsPhone and 48 or 58
-			),
+local ESPOutlineRow, ESPOutlineButton =
+    CreateToggleRow(
+        "Show Outline",
 
-		BackgroundColor3 =
-			COLORS.Panel,
+        function()
+            return Config.ESPShowOutline
+        end,
 
-		BorderSizePixel = 0,
+        function(Value)
+            Config.ESPShowOutline = Value
+        end
+    )
 
-		Text =
-			"THIRD PERSON AIM\n" ..
-			"Targets UpperTorso/Torso.\n" ..
-			"If your Y is higher, aim moves down based on the difference.",
+local ESPWhitelistRow, ESPWhitelistButton =
+    CreateToggleRow(
+        "Whitelist Check",
 
-		Font =
-			Enum.Font.Gotham,
+        function()
+            return Config.ESPWhitelistCheck
+        end,
 
-		TextSize =
-			IsPhone and 6 or 8,
-
-		TextColor3 =
-			COLORS.Gray,
-
-		TextWrapped = true,
+        function(Value)
+            Config.ESPWhitelistCheck = Value
+        end
+    )
 
-		TextXAlignment =
-			Enum.TextXAlignment.Left,
+--==============================================================
+-- WHITELIST
+--==============================================================
 
-		TextYAlignment =
-			Enum.TextYAlignment.Center,
+CreateSection("WHITELIST")
 
-		ZIndex = 102,
-	}
-)
+local WhitelistInfoRow = CreateRow(45)
 
-Round(
-	HeightInfo,
-	IsPhone and 7 or 9
-)
+local WhitelistInfo = Instance.new("TextLabel")
 
---============================================================
--- ESP PAGE
---============================================================
+WhitelistInfo.BackgroundTransparency = 1
+WhitelistInfo.Position =
+    UDim2.new(0, 10, 0, 4)
 
-CreateSection(
-	ESPPage,
-	"ESP"
-)
+WhitelistInfo.Size =
+    UDim2.new(1, -20, 1, -8)
 
-CreateToggle(
-	ESPPage,
-	"ESP Enabled",
-	"Enable player ESP",
-	Config.ESPEnabled,
-	function(value)
+WhitelistInfo.Font =
+    Enum.Font.Gotham
 
-		Config.ESPEnabled =
-			value
+WhitelistInfo.Text =
+    "Tap a player to whitelist / unwhitelist them.\nRED = WHITELISTED"
 
-	end
-)
+WhitelistInfo.TextColor3 = GRAY
+WhitelistInfo.TextSize = IsMobile and 9 or 10
+WhitelistInfo.TextWrapped = true
+WhitelistInfo.TextXAlignment =
+    Enum.TextXAlignment.Left
 
-CreateToggle(
-	ESPPage,
-	"Show Name",
-	"Name above head",
-	Config.ESPShowName,
-	function(value)
+WhitelistInfo.TextYAlignment =
+    Enum.TextYAlignment.Center
 
-		Config.ESPShowName =
-			value
+WhitelistInfo.ZIndex = 13
+WhitelistInfo.Parent = WhitelistInfoRow
 
-	end
-)
+local WhitelistContainer = Instance.new("Frame")
 
-CreateToggle(
-	ESPPage,
-	"Show Outline",
-	"Team-colored outline",
-	Config.ESPShowOutline,
-	function(value)
+WhitelistContainer.Name =
+    "WhitelistContainer"
 
-		Config.ESPShowOutline =
-			value
+WhitelistContainer.BackgroundTransparency = 1
+WhitelistContainer.Size =
+    UDim2.new(1, 0, 0, 10)
 
-	end
-)
+WhitelistContainer.ZIndex = 12
+WhitelistContainer.Parent = Scroll
 
-CreateToggle(
-	ESPPage,
-	"ESP Whitelist",
-	"Hide whitelisted players",
-	Config.ESPWhitelistCheck,
-	function(value)
+local WhitelistLayout = Instance.new("UIListLayout")
+WhitelistLayout.Padding =
+    UDim.new(0, 6)
 
-		Config.ESPWhitelistCheck =
-			value
+WhitelistLayout.SortOrder =
+    Enum.SortOrder.LayoutOrder
 
-	end
-)
+WhitelistLayout.Parent =
+    WhitelistContainer
 
-CreateSection(
-	ESPPage,
-	"STYLE"
-)
+--==============================================================
+-- STATUS
+--==============================================================
 
-local ESPInfo = Create(
-	"TextLabel",
-	{
+CreateSection("STATUS")
 
-		Parent = ESPPage,
+local StatusRow = CreateRow(55)
 
-		Size =
-			UDim2.new(
-				1,
-				-2,
-				0,
-				IsPhone and 45 or 60
-			),
+local StatusLabel = Instance.new("TextLabel")
 
-		BackgroundColor3 =
-			COLORS.Panel,
+StatusLabel.BackgroundTransparency = 1
+StatusLabel.Position =
+    UDim2.new(0, 12, 0, 5)
 
-		BorderSizePixel = 0,
+StatusLabel.Size =
+    UDim2.new(1, -24, 0, 20)
 
-		Text =
-			"XENON ESP\n" ..
-			"Team colors • Names • Distance",
+StatusLabel.Font =
+    Enum.Font.GothamBold
 
-		Font =
-			Enum.Font.Gotham,
+StatusLabel.Text = "UNLOCKED"
+StatusLabel.TextColor3 = GRAY
+StatusLabel.TextSize = IsMobile and 12 or 14
+StatusLabel.TextXAlignment =
+    Enum.TextXAlignment.Left
 
-		TextSize =
-			IsPhone and 7 or 8,
+StatusLabel.ZIndex = 13
+StatusLabel.Parent = StatusRow
 
-		TextColor3 =
-			COLORS.Gray,
+local TargetLabel = Instance.new("TextLabel")
 
-		TextXAlignment =
-			Enum.TextXAlignment.Left,
+TargetLabel.BackgroundTransparency = 1
+TargetLabel.Position =
+    UDim2.new(0, 12, 0, 27)
 
-		TextYAlignment =
-			Enum.TextYAlignment.Center,
+TargetLabel.Size =
+    UDim2.new(1, -24, 0, 18)
 
-		ZIndex = 102,
-	}
-)
+TargetLabel.Font =
+    Enum.Font.Gotham
 
-Round(
-	ESPInfo,
-	IsPhone and 7 or 9
-)
+TargetLabel.Text =
+    "Target: None"
 
---============================================================
--- WHITELIST PAGE
---============================================================
+TargetLabel.TextColor3 = GRAY
+TargetLabel.TextSize = IsMobile and 9 or 10
+TargetLabel.TextXAlignment =
+    Enum.TextXAlignment.Left
 
-CreateSection(
-	WhitelistPage,
-	"SERVER WHITELIST"
-)
+TargetLabel.ZIndex = 13
+TargetLabel.Parent = StatusRow
 
-local WhitelistInfo = Create(
-	"TextLabel",
-	{
-
-		Parent = WhitelistPage,
-
-		Size =
-			UDim2.new(
-				1,
-				-2,
-				0,
-				IsPhone and 34 or 42
-			),
-
-		BackgroundColor3 =
-			COLORS.Panel,
-
-		BorderSizePixel = 0,
-
-		Text =
-			"Tap a player to toggle\n" ..
-			"Grey = normal • Red = whitelist",
-
-		Font =
-			Enum.Font.Gotham,
-
-		TextSize =
-			IsPhone and 6 or 8,
-
-		TextColor3 =
-			COLORS.Gray,
-
-		TextXAlignment =
-			Enum.TextXAlignment.Left,
-
-		TextYAlignment =
-			Enum.TextYAlignment.Center,
-
-		ZIndex = 102,
-	}
-)
-
-Round(
-	WhitelistInfo,
-	IsPhone and 7 or 9
-)
-
-local WhitelistList = Create(
-	"Frame",
-	{
-
-		Parent = WhitelistPage,
-
-		Size =
-			UDim2.new(
-				1,
-				-2,
-				0,
-				0
-			),
-
-		BackgroundTransparency = 1,
-
-		AutomaticSize =
-			Enum.AutomaticSize.Y,
-
-		ZIndex = 102,
-	}
-)
-
-Create(
-	"UIListLayout",
-	{
-
-		Parent = WhitelistList,
-
-		Padding =
-			UDim.new(
-				0,
-				IsPhone and 4 or 6
-			),
-
-		SortOrder =
-			Enum.SortOrder.Name,
-	}
-)
-
---============================================================
+--==============================================================
 -- WHITELIST UI
---============================================================
+--==============================================================
+
+local function ClearWhitelistUI()
+    for _, Child in ipairs(
+        WhitelistContainer:GetChildren()
+    ) do
+        if Child:IsA("Frame") then
+            Child:Destroy()
+        end
+    end
+end
+
+local function CreateWhitelistEntry(Player)
+    local Entry = Instance.new("TextButton")
+
+    Entry.Name =
+        "Whitelist_" .. Player.UserId
+
+    Entry.Size =
+        UDim2.new(1, 0, 0, 40)
+
+    Entry.BackgroundColor3 =
+        IsWhitelisted(Player)
+        and RED
+        or DARK
+
+    Entry.BorderSizePixel = 0
+
+    Entry.Text =
+        Player.DisplayName ..
+        "  @" ..
+        Player.Name
+
+    Entry.TextColor3 = WHITE
+
+    Entry.TextSize =
+        IsMobile and 9 or 11
+
+    Entry.Font =
+        Enum.Font.GothamMedium
+
+    Entry.TextXAlignment =
+        Enum.TextXAlignment.Left
+
+    Entry.AutoButtonColor = false
+    Entry.ZIndex = 13
+    Entry.Parent = WhitelistContainer
+
+    local Padding = Instance.new("UIPadding")
+    Padding.PaddingLeft =
+        UDim.new(0, 12)
+    Padding.Parent = Entry
+
+    local Corner = Instance.new("UICorner")
+    Corner.CornerRadius =
+        UDim.new(0, 8)
+    Corner.Parent = Entry
+
+    local function Refresh()
+        if IsWhitelisted(Player) then
+            Entry.BackgroundColor3 = RED
+        else
+            Entry.BackgroundColor3 = DARK
+        end
+    end
+
+    Entry.Activated:Connect(function()
+        SetWhitelist(
+            Player,
+            not IsWhitelisted(Player)
+        )
+
+        Refresh()
+
+        -- If aimbot whitelist skip is active and
+        -- this player is currently targeted, unlock.
+        if Locked
+            and LockedTarget == Player
+            and Config.AimbotWhitelistSkip
+            and IsWhitelisted(Player) then
+
+            Locked = false
+            LockedTarget = nil
+        end
+    end)
+
+    return Entry
+end
 
 local function RefreshWhitelistUI()
+    ClearWhitelistUI()
 
-	for _, child in ipairs(
-		WhitelistList:GetChildren()
-	) do
+    local PlayerList = Players:GetPlayers()
 
-		if child:IsA(
-			"TextButton"
-		) then
+    table.sort(
+        PlayerList,
+        function(A, B)
+            return A.Name:lower() <
+                B.Name:lower()
+        end
+    )
 
-			child:Destroy()
+    for _, Player in ipairs(PlayerList) do
+        if Player ~= LocalPlayer then
+            CreateWhitelistEntry(Player)
+        end
+    end
 
-		end
-	end
-
-	for _, player in ipairs(
-		Players:GetPlayers()
-	) do
-
-		if player ~= LocalPlayer then
-
-			local enabled =
-				IsWhitelisted(
-					player
-				)
-
-			local button = Create(
-				"TextButton",
-				{
-
-					Name =
-						player.Name,
-
-					Parent =
-						WhitelistList,
-
-					Size =
-						UDim2.new(
-							1,
-							0,
-							0,
-							IsPhone and 31 or 40
-						),
-
-					BackgroundColor3 =
-						enabled
-						and COLORS.Red
-						or COLORS.Panel,
-
-					BorderSizePixel = 0,
-
-					Text =
-						player.DisplayName ..
-						"  @" ..
-						player.Name,
-
-					Font =
-						Enum.Font.GothamSemibold,
-
-					TextSize =
-						IsPhone and 7 or 9,
-
-					TextColor3 =
-						COLORS.White,
-
-					TextXAlignment =
-						Enum.TextXAlignment.Left,
-
-					AutoButtonColor = false,
-
-					ZIndex = 103,
-				}
-			)
-
-			Round(
-				button,
-				IsPhone and 7 or 9
-			)
-
-			Create(
-				"UIPadding",
-				{
-
-					Parent = button,
-
-					PaddingLeft =
-						UDim.new(
-							0,
-							IsPhone and 8 or 12
-						),
-				}
-			)
-
-			button.Activated:Connect(
-				function()
-
-					local id =
-						tostring(
-							player.UserId
-						)
-
-					Whitelist[id] =
-						not IsWhitelisted(
-							player
-						)
-
-					SaveWhitelist()
-
-					if
-						LockedTarget ==
-							player
-						and
-						Config.AimbotWhitelistSkip
-						and
-						IsWhitelisted(
-							player
-						)
-					then
-
-						Unlock()
-
-					end
-
-					RefreshWhitelistUI()
-				end
-			)
-		end
-	end
+    task.defer(function()
+        WhitelistContainer.Size =
+            UDim2.new(
+                1,
+                0,
+                0,
+                WhitelistLayout.AbsoluteContentSize.Y
+            )
+    end)
 end
 
-RefreshWhitelistUI()
+--==============================================================
+-- ESP
+--==============================================================
 
---============================================================
--- TAB SWITCHING
---============================================================
+local function DestroyESP(Player)
+    local Data = ESPObjects[Player]
 
-local PagesByName = {
+    if not Data then
+        return
+    end
 
-	AIM = AimPage,
+    if Data.Highlight then
+        pcall(function()
+            Data.Highlight:Destroy()
+        end)
+    end
 
-	ESP = ESPPage,
+    if Data.NameGui then
+        pcall(function()
+            Data.NameGui:Destroy()
+        end)
+    end
 
-	WHITELIST = WhitelistPage,
+    ESPObjects[Player] = nil
+end
+
+local function CreateESP(Player)
+    if Player == LocalPlayer then
+        return
+    end
+
+    DestroyESP(Player)
+
+    local Character = Player.Character
+
+    if not Character then
+        return
+    end
+
+    local Data = {}
+
+    --==========================================================
+    -- OUTLINE
+    --==========================================================
+
+    if Config.ESPShowOutline then
+        local Highlight =
+            Instance.new("Highlight")
+
+        Highlight.Name =
+            "XenonESP"
+
+        Highlight.Adornee =
+            Character
+
+        Highlight.FillTransparency = 1
+
+        Highlight.OutlineTransparency = 0
+
+        Highlight.OutlineColor = WHITE
+
+        Highlight.DepthMode =
+            Enum.HighlightDepthMode.AlwaysOnTop
+
+        Highlight.Parent = Character
+
+        Data.Highlight = Highlight
+    end
+
+    --==========================================================
+    -- NAME
+    --==========================================================
+
+    if Config.ESPShowName then
+        local Head =
+            Character:FindFirstChild("Head")
+
+        local Root =
+            Character:FindFirstChild(
+                "HumanoidRootPart"
+            )
+
+        local Adornee =
+            Head or Root
+
+        if Adornee then
+            local Billboard =
+                Instance.new("BillboardGui")
+
+            Billboard.Name =
+                "XenonName"
+
+            Billboard.Adornee =
+                Adornee
+
+            Billboard.Size =
+                UDim2.fromOffset(150, 30)
+
+            Billboard.StudsOffset =
+                Vector3.new(0, 2.7, 0)
+
+            Billboard.AlwaysOnTop = true
+
+            Billboard.MaxDistance = 1000
+
+            Billboard.Parent = Adornee
+
+            local NameLabel =
+                Instance.new("TextLabel")
+
+            NameLabel.BackgroundTransparency = 1
+            NameLabel.Size =
+                UDim2.fromScale(1, 1)
+
+            NameLabel.Font =
+                Enum.Font.GothamBold
+
+            NameLabel.Text =
+                Player.DisplayName ..
+                "  @" ..
+                Player.Name
+
+            NameLabel.TextColor3 =
+                WHITE
+
+            NameLabel.TextStrokeTransparency =
+                0.3
+
+            NameLabel.TextSize = 12
+
+            NameLabel.Parent =
+                Billboard
+
+            Data.NameGui = Billboard
+        end
+    end
+
+    ESPObjects[Player] = Data
+end
+
+local function ShouldESP(Player)
+    if Player == LocalPlayer then
+        return false
+    end
+
+    if not Config.ESPEnabled then
+        return false
+    end
+
+    if Config.ESPWhitelistCheck
+        and IsWhitelisted(Player) then
+
+        return false
+    end
+
+    return true
+end
+
+local function UpdateESPPlayer(Player)
+    if Player == LocalPlayer then
+        return
+    end
+
+    if ShouldESP(Player) then
+        CreateESP(Player)
+    else
+        DestroyESP(Player)
+    end
+end
+
+local function UpdateAllESP()
+    for _, Player in ipairs(
+        Players:GetPlayers()
+    ) do
+        UpdateESPPlayer(Player)
+    end
+end
+
+-- Rebuild ESP when settings change.
+
+ESPEnabledButton.Activated:Connect(function()
+    task.defer(UpdateAllESP)
+end)
+
+ESPNameButton.Activated:Connect(function()
+    task.defer(UpdateAllESP)
+end)
+
+ESPOutlineButton.Activated:Connect(function()
+    task.defer(UpdateAllESP)
+end)
+
+ESPWhitelistButton.Activated:Connect(function()
+    task.defer(UpdateAllESP)
+end)
+
+--==============================================================
+-- PLAYER EVENTS
+--==============================================================
+
+Connect(
+    Players.PlayerAdded,
+    function(Player)
+        task.defer(function()
+            RefreshWhitelistUI()
+
+            if Player.Character then
+                UpdateESPPlayer(Player)
+            end
+        end)
+
+        Player.CharacterAdded:Connect(function()
+            task.wait(0.5)
+
+            UpdateESPPlayer(Player)
+        end)
+    end
+)
+
+Connect(
+    Players.PlayerRemoving,
+    function(Player)
+        if Player == LockedTarget then
+            Locked = false
+            LockedTarget = nil
+        end
+
+        DestroyESP(Player)
+
+        task.defer(function()
+            RefreshWhitelistUI()
+        end)
+    end
+)
+
+for _, Player in ipairs(
+    Players:GetPlayers()
+) do
+    if Player ~= LocalPlayer then
+        Connect(
+            Player.CharacterAdded,
+            function()
+                task.wait(0.5)
+
+                UpdateESPPlayer(Player)
+            end
+        )
+    end
+end
+
+--==============================================================
+-- TARGET DATA
+--==============================================================
+
+local function GetCharacterData(Player)
+    if not Player then
+        return nil
+    end
+
+    if Player == LocalPlayer then
+        return nil
+    end
+
+    local Character =
+        Player.Character
+
+    if not Character then
+        return nil
+    end
+
+    local Humanoid =
+        Character:FindFirstChildOfClass(
+            "Humanoid"
+        )
+
+    local Root =
+        Character:FindFirstChild(
+            "HumanoidRootPart"
+        )
+
+    if not Humanoid or not Root then
+        return nil
+    end
+
+    if Humanoid.Health <= 0 then
+        return nil
+    end
+
+    return Character,
+        Humanoid,
+        Root
+end
+
+--==============================================================
+-- LOCAL ROOT
+--==============================================================
+
+local function GetLocalRoot()
+    local Character =
+        LocalPlayer.Character
+
+    if not Character then
+        return nil
+    end
+
+    return Character:FindFirstChild(
+        "HumanoidRootPart"
+    )
+end
+
+--==============================================================
+-- CAMERA CENTER TARGET
+--==============================================================
+
+local function GetClosestToCursor()
+    local CurrentCamera =
+        workspace.CurrentCamera
+
+    if not CurrentCamera then
+        return nil
+    end
+
+    local Viewport =
+        CurrentCamera.ViewportSize
+
+    local Center =
+        Vector2.new(
+            Viewport.X / 2,
+            Viewport.Y / 2
+        )
+
+    local BestPlayer = nil
+    local BestDistance = math.huge
+
+    for _, Player in ipairs(
+        Players:GetPlayers()
+    ) do
+
+        if
+            not (
+                Config.AimbotWhitelistSkip
+                and IsWhitelisted(Player)
+            )
+        then
+
+            local Character,
+                Humanoid,
+                Root =
+                GetCharacterData(Player)
+
+            if Character
+                and Humanoid
+                and Root then
+
+                local WorldDistance =
+                    (
+                        Root.Position -
+                        CurrentCamera.CFrame.Position
+                    ).Magnitude
+
+                if WorldDistance <=
+                    Config.MaxTargetDistance then
+
+                    local ScreenPosition,
+                        OnScreen =
+                        CurrentCamera:WorldToViewportPoint(
+                            Root.Position
+                        )
+
+                    if OnScreen
+                        and ScreenPosition.Z > 0 then
+
+                        local ScreenDistance =
+                            (
+                                Vector2.new(
+                                    ScreenPosition.X,
+                                    ScreenPosition.Y
+                                ) -
+                                Center
+                            ).Magnitude
+
+                        if ScreenDistance <
+                            BestDistance then
+
+                            BestDistance =
+                                ScreenDistance
+
+                            BestPlayer =
+                                Player
+                        end
+                    end
+                end
+            end
+        end
+    end
+
+    return BestPlayer
+end
+
+--==============================================================
+-- PHYSICAL DISTANCE TARGET
+--==============================================================
+
+local function GetClosestByDistance()
+    local LocalRoot =
+        GetLocalRoot()
+
+    if not LocalRoot then
+        return nil
+    end
+
+    local BestPlayer = nil
+
+    local BestDistance =
+        Config.MaxTargetDistance
+
+    for _, Player in ipairs(
+        Players:GetPlayers()
+    ) do
+
+        if
+            not (
+                Config.AimbotWhitelistSkip
+                and IsWhitelisted(Player)
+            )
+        then
+
+            local Character,
+                Humanoid,
+                Root =
+                GetCharacterData(Player)
+
+            if Character
+                and Humanoid
+                and Root then
+
+                local Distance =
+                    (
+                        Root.Position -
+                        LocalRoot.Position
+                    ).Magnitude
+
+                if Distance <=
+                    BestDistance then
+
+                    BestDistance =
+                        Distance
+
+                    BestPlayer =
+                        Player
+                end
+            end
+        end
+    end
+
+    return BestPlayer
+end
+
+--==============================================================
+-- FIND TARGET
+--==============================================================
+
+local function FindTarget()
+    if Config.StickyAim then
+        return GetClosestToCursor()
+    end
+
+    return GetClosestByDistance()
+end
+
+--==============================================================
+-- PREDICTION
+--==============================================================
+
+local function GetPredictedPosition(
+    Position,
+    Velocity
+)
+    return Position +
+        Velocity * Config.Prediction
+end
+
+--==============================================================
+-- ADAPTIVE OFFSET
+--==============================================================
+
+local function GetAdaptiveOffset(TargetRoot)
+    local CurrentCamera =
+        workspace.CurrentCamera
+
+    if not CurrentCamera
+        or not TargetRoot then
+
+        return Config.AimOffset
+    end
+
+    local Distance =
+        (
+            TargetRoot.Position -
+            CurrentCamera.CFrame.Position
+        ).Magnitude
+
+    local Adaptive =
+        Config.AimOffset *
+        (
+            Distance /
+            Config.ReferenceDistance
+        )
+
+    return math.clamp(
+        Adaptive,
+        -100,
+        100
+    )
+end
+
+--==============================================================
+-- AIM POSITION
+--==============================================================
+
+local function GetAimPosition(Player)
+    local Character,
+        Humanoid,
+        Root =
+        GetCharacterData(Player)
+
+    if not Character
+        or not Humanoid
+        or not Root then
+
+        return nil
+    end
+
+    if Config.CameraMode ==
+        "First Person" then
+
+        local Head =
+            Character:FindFirstChild(
+                "Head"
+            )
+
+        if Head then
+            return GetPredictedPosition(
+                Head.Position,
+                Head.AssemblyLinearVelocity
+            )
+        end
+
+        return GetPredictedPosition(
+            Root.Position,
+            Root.AssemblyLinearVelocity
+        )
+    end
+
+    local Predicted =
+        GetPredictedPosition(
+            Root.Position,
+            Root.AssemblyLinearVelocity
+        )
+
+    local Offset =
+        GetAdaptiveOffset(Root)
+
+    return Predicted -
+        Vector3.new(
+            0,
+            Offset,
+            0
+        )
+end
+
+--==============================================================
+-- STATUS
+--==============================================================
+
+local function UpdateStatus()
+    if Locked
+        and LockedTarget then
+
+        StatusLabel.Text =
+            "LOCKED"
+
+        StatusLabel.TextColor3 =
+            RED
+
+        TargetLabel.Text =
+            "Target: " ..
+            LockedTarget.Name
+    else
+        StatusLabel.Text =
+            "UNLOCKED"
+
+        StatusLabel.TextColor3 =
+            GRAY
+
+        TargetLabel.Text =
+            "Target: None"
+    end
+end
+
+--==============================================================
+-- UNLOCK
+--==============================================================
+
+local function Unlock()
+    Locked = false
+    LockedTarget = nil
+
+    UpdateStatus()
+end
+
+--==============================================================
+-- LOCK
+--==============================================================
+
+local function Lock()
+    if Locked then
+        Unlock()
+        return
+    end
+
+    local Target =
+        FindTarget()
+
+    if not Target then
+        UpdateStatus()
+        return
+    end
+
+    if Config.AimbotWhitelistSkip
+        and IsWhitelisted(Target) then
+
+        return
+    end
+
+    LockedTarget =
+        Target
+
+    Locked = true
+
+    UpdateStatus()
+end
+
+--==============================================================
+-- TARGET VALIDATION
+--==============================================================
+
+local function IsTargetValid(Player)
+    if not Player then
+        return false
+    end
+
+    if Player.Parent ~= Players then
+        return false
+    end
+
+    if Config.AimbotWhitelistSkip
+        and IsWhitelisted(Player) then
+
+        return false
+    end
+
+    local Character,
+        Humanoid,
+        Root =
+        GetCharacterData(Player)
+
+    return Character ~= nil
+        and Humanoid ~= nil
+        and Root ~= nil
+end
+
+--==============================================================
+-- CONTROLLER BUTTONS
+--==============================================================
+
+local SupportedButtons = {
+    [Enum.KeyCode.ButtonA] = true,
+    [Enum.KeyCode.ButtonB] = true,
+    [Enum.KeyCode.ButtonX] = true,
+    [Enum.KeyCode.ButtonY] = true,
+
+    [Enum.KeyCode.DPadUp] = true,
+    [Enum.KeyCode.DPadDown] = true,
+    [Enum.KeyCode.DPadLeft] = true,
+    [Enum.KeyCode.DPadRight] = true,
+
+    [Enum.KeyCode.ButtonL1] = true,
+    [Enum.KeyCode.ButtonR1] = true,
+
+    [Enum.KeyCode.ButtonSelect] = true,
+    [Enum.KeyCode.ButtonStart] = true,
+
+    [Enum.KeyCode.ButtonL3] = true,
+    [Enum.KeyCode.ButtonR3] = true,
+
+    [Enum.KeyCode.Thumbstick1] = true,
+    [Enum.KeyCode.Thumbstick2] = true,
+
+    [Enum.KeyCode.ButtonL2] = true,
+    [Enum.KeyCode.ButtonR2] = true,
 }
 
-local function SetTab(name)
+--==============================================================
+-- CONTROLLER INPUT
+--==============================================================
 
-	CurrentTab = name
+Connect(
+    UserInputService.InputBegan,
+    function(Input, GameProcessed)
 
-	for pageName, page in pairs(
-		PagesByName
-	) do
+        if GameProcessed then
+            return
+        end
 
-		page.Visible =
-			pageName == name
+        if Input.UserInputType ~=
+            Enum.UserInputType.Gamepad1 then
 
-	end
+            return
+        end
 
-	for tabName, data in pairs(
-		TabButtons
-	) do
+        -- REBIND
+        if WaitingForButton then
 
-		local active =
-			tabName == name
+            if SupportedButtons[
+                Input.KeyCode
+            ] then
 
-		data.Button.BackgroundColor3 =
-			active
-			and COLORS.Red
-			or COLORS.Panel2
+                Config.LockButton =
+                    Input.KeyCode
 
-		data.Button.TextColor3 =
-			active
-			and COLORS.White
-			or COLORS.Gray
+                LockButtonDisplay.Text =
+                    Input.KeyCode.Name
 
-		data.Indicator.Visible =
-			active
-	end
-end
+                WaitingForButton = false
 
-for name, data in pairs(
-	TabButtons
-) do
+                RebindButton.Text =
+                    "SET LOCK BUTTON"
 
-	data.Button.Activated:Connect(
-		function()
+                RebindButton.BackgroundColor3 =
+                    RED
+            end
 
-			SetTab(name)
+            return
+        end
 
-		end
-	)
-end
+        -- LOCK
+        if Input.KeyCode ==
+            Config.LockButton then
 
-SetTab("AIM")
+            Lock()
+        end
+    end
+)
 
---============================================================
+--==============================================================
+-- REBIND
+--==============================================================
+
+RebindButton.Activated:Connect(function()
+    WaitingForButton =
+        not WaitingForButton
+
+    if WaitingForButton then
+        RebindButton.Text =
+            "PRESS CONTROLLER BUTTON..."
+
+        RebindButton.BackgroundColor3 =
+            DARK_RED
+    else
+        RebindButton.Text =
+            "SET LOCK BUTTON"
+
+        RebindButton.BackgroundColor3 =
+            RED
+    end
+end)
+
+--==============================================================
+-- CLOSE
+--==============================================================
+
+CloseButton.Activated:Connect(function()
+    MainVisible = false
+
+    MainFrame.Visible =
+        false
+
+    FloatingToggle.Text =
+        "+"
+end)
+
+--==============================================================
+-- FLOATING TOGGLE
+--==============================================================
+
+FloatingToggle.Activated:Connect(function()
+    MainVisible =
+        not MainVisible
+
+    MainFrame.Visible =
+        MainVisible
+
+    if MainVisible then
+        FloatingToggle.Text =
+            "X"
+    else
+        FloatingToggle.Text =
+            "+"
+    end
+end)
+
+FloatingToggle.MouseEnter:Connect(function()
+    FloatingToggle.BackgroundColor3 =
+        LIGHT_DARK
+end)
+
+FloatingToggle.MouseLeave:Connect(function()
+    FloatingToggle.BackgroundColor3 =
+        BLACK
+end)
+
+--==============================================================
+-- LOCAL CHARACTER
+--==============================================================
+
+Connect(
+    LocalPlayer.CharacterAdded,
+    function()
+        Unlock()
+    end
+)
+
+--==============================================================
+-- CAMERA LOCK
+--==============================================================
+
+RunService:BindToRenderStep(
+    "XenonCameraLock",
+    Enum.RenderPriority.Last.Value,
+    function()
+
+        if not Locked then
+            return
+        end
+
+        if not IsTargetValid(
+            LockedTarget
+        ) then
+
+            Unlock()
+            return
+        end
+
+        local CurrentCamera =
+            workspace.CurrentCamera
+
+        if not CurrentCamera then
+            return
+        end
+
+        local AimPosition =
+            GetAimPosition(
+                LockedTarget
+            )
+
+        if not AimPosition then
+            Unlock()
+            return
+        end
+
+        local CameraPosition =
+            CurrentCamera.CFrame.Position
+
+        local DesiredCFrame =
+            CFrame.lookAt(
+                CameraPosition,
+                AimPosition
+            )
+
+        -- HARD LOCK
+        if Config.Smoothing <= 0 then
+            CurrentCamera.CFrame =
+                DesiredCFrame
+
+            return
+        end
+
+        -- SMOOTH LOCK
+        local Alpha =
+            math.clamp(
+                1 /
+                (
+                    Config.Smoothing +
+                    1
+                ),
+                0,
+                1
+            )
+
+        CurrentCamera.CFrame =
+            CurrentCamera.CFrame:Lerp(
+                DesiredCFrame,
+                Alpha
+            )
+    end
+)
+
+--==============================================================
 -- DRAGGING
---============================================================
+--==============================================================
 
 local Dragging = false
 local DragStart
 local StartPosition
 
-TopBar.InputBegan:Connect(
-	function(input)
+TopBar.InputBegan:Connect(function(Input)
 
-		if
-			input.UserInputType ==
-				Enum.UserInputType.MouseButton1
-			or
-			input.UserInputType ==
-				Enum.UserInputType.Touch
-		then
+    if Input.UserInputType ==
+        Enum.UserInputType.MouseButton1
+        or
+        Input.UserInputType ==
+        Enum.UserInputType.Touch then
 
-			Dragging = true
+        Dragging = true
 
-			DragStart =
-				input.Position
+        DragStart =
+            Input.Position
 
-			StartPosition =
-				Main.Position
+        StartPosition =
+            MainFrame.Position
 
-			input.Changed:Connect(
-				function()
+        local ChangedConnection
 
-					if
-						input.UserInputState ==
-							Enum.UserInputState.End
-					then
+        ChangedConnection =
+            Input.Changed:Connect(
+                function()
 
-						Dragging = false
+                    if Input.UserInputState ==
+                        Enum.UserInputState.End then
 
-					end
-				end
-			)
-		end
-	end
+                        Dragging = false
+
+                        if ChangedConnection then
+                            ChangedConnection:Disconnect()
+                        end
+                    end
+                end
+            )
+    end
+end)
+
+Connect(
+    UserInputService.InputChanged,
+    function(Input)
+
+        if not Dragging then
+            return
+        end
+
+        if Input.UserInputType ~=
+            Enum.UserInputType.MouseMovement
+            and
+            Input.UserInputType ~=
+            Enum.UserInputType.Touch then
+
+            return
+        end
+
+        local Delta =
+            Input.Position -
+            DragStart
+
+        MainFrame.Position =
+            UDim2.new(
+                StartPosition.X.Scale,
+                StartPosition.X.Offset +
+                    Delta.X,
+
+                StartPosition.Y.Scale,
+                StartPosition.Y.Offset +
+                    Delta.Y
+            )
+    end
 )
 
-UserInputService.InputChanged:Connect(
-	function(input)
+--==============================================================
+-- RESPONSIVE CAMERA
+--==============================================================
 
-		if not Dragging then
-			return
-		end
+UpdateResponsiveState()
 
-		if
-			input.UserInputType ~=
-				Enum.UserInputType.MouseMovement
-			and
-			input.UserInputType ~=
-				Enum.UserInputType.Touch
-		then
-
-			return
-		end
-
-		local delta =
-			input.Position -
-			DragStart
-
-		Main.Position =
-			UDim2.new(
-
-				StartPosition.X.Scale,
-
-				StartPosition.X.Offset +
-					delta.X,
-
-				StartPosition.Y.Scale,
-
-				StartPosition.Y.Offset +
-					delta.Y
-			)
-	end
+Camera:GetPropertyChangedSignal(
+    "ViewportSize"
+):Connect(
+    UpdateResponsiveState
 )
 
---============================================================
--- FLOATING REOPEN BUTTON
---============================================================
+--==============================================================
+-- CANVAS SIZE
+--==============================================================
 
-local Floating = Create(
-	"TextButton",
-	{
+Layout:GetPropertyChangedSignal(
+    "AbsoluteContentSize"
+):Connect(
+    function()
 
-		Name =
-			"XenonFloating",
-
-		Parent = Gui,
-
-		Size =
-			UDim2.fromOffset(
-				IsPhone and 34 or 42,
-				IsPhone and 34 or 42
-			),
-
-		Position =
-			UDim2.new(
-				1,
-				IsPhone and -42 or -54,
-				0,
-				IsPhone and 8 or 12
-			),
-
-		BackgroundColor3 =
-			COLORS.Red,
-
-		BorderSizePixel = 0,
-
-		Text = "X",
-
-		Font =
-			Enum.Font.GothamBold,
-
-		TextSize =
-			IsPhone and 12 or 15,
-
-		TextColor3 =
-			COLORS.White,
-
-		AutoButtonColor = false,
-
-		Visible = false,
-
-		ZIndex = 1000,
-	}
+        Scroll.CanvasSize =
+            UDim2.fromOffset(
+                0,
+                Layout.AbsoluteContentSize.Y +
+                    25
+            )
+    end
 )
 
-Round(
-	Floating,
-	IsPhone and 9 or 12
+WhitelistLayout:GetPropertyChangedSignal(
+    "AbsoluteContentSize"
+):Connect(
+    function()
+
+        WhitelistContainer.Size =
+            UDim2.new(
+                1,
+                0,
+                0,
+                WhitelistLayout.AbsoluteContentSize.Y
+            )
+    end
 )
 
-Close.Activated:Connect(
-	function()
+--==============================================================
+-- INITIAL WHITELIST UI
+--==============================================================
 
-		UIVisible = false
+RefreshWhitelistUI()
 
-		Main.Visible = false
+--==============================================================
+-- INITIAL ESP
+--==============================================================
 
-		Floating.Visible = true
+task.defer(function()
+    UpdateAllESP()
+end)
 
-	end
-)
-
-Floating.Activated:Connect(
-	function()
-
-		UIVisible = true
-
-		Main.Visible = true
-
-		Floating.Visible = false
-
-	end
-)
-
---============================================================
--- SUPPORTED CONTROLLER BUTTONS
---============================================================
-
-local SupportedButtons = {
-
-	[Enum.KeyCode.ButtonA] = true,
-	[Enum.KeyCode.ButtonB] = true,
-	[Enum.KeyCode.ButtonX] = true,
-	[Enum.KeyCode.ButtonY] = true,
-
-	[Enum.KeyCode.DPadUp] = true,
-	[Enum.KeyCode.DPadDown] = true,
-	[Enum.KeyCode.DPadLeft] = true,
-	[Enum.KeyCode.DPadRight] = true,
-
-	[Enum.KeyCode.ButtonL1] = true,
-	[Enum.KeyCode.ButtonR1] = true,
-
-	[Enum.KeyCode.ButtonSelect] = true,
-	[Enum.KeyCode.ButtonStart] = true,
-
-	[Enum.KeyCode.ButtonL3] = true,
-	[Enum.KeyCode.ButtonR3] = true,
-
-	[Enum.KeyCode.Thumbstick1] = true,
-	[Enum.KeyCode.Thumbstick2] = true,
-
-	[Enum.KeyCode.ButtonL2] = true,
-	[Enum.KeyCode.ButtonR2] = true,
-}
-
---============================================================
--- REBIND
---============================================================
-
-local function SetLockButton(
-	key
-)
-
-	Config.LockButton =
-		key
-
-	Rebinding = false
-
-	ControllerInfo.Text =
-		"LOCK: " ..
-		Config.LockButton.Name
-end
-
-UserInputService.InputBegan:Connect(
-	function(input)
-
-		if
-			input.UserInputType ~=
-				Enum.UserInputType.Gamepad1
-		then
-
-			return
-		end
-
-		if not SupportedButtons[
-			input.KeyCode
-		] then
-
-			return
-		end
-
-		if Rebinding then
-
-			SetLockButton(
-				input.KeyCode
-			)
-
-			return
-		end
-
-		if
-			input.KeyCode ==
-				Config.LockButton
-		then
-
-			ToggleLock()
-
-		end
-	end
-)
-
---============================================================
--- THUMBSTICK REBIND
---============================================================
-
-UserInputService.InputChanged:Connect(
-	function(input)
-
-		if not Rebinding then
-			return
-		end
-
-		if
-			input.UserInputType ~=
-				Enum.UserInputType.Gamepad1
-		then
-
-			return
-		end
-
-		if
-			input.KeyCode ~=
-				Enum.KeyCode.Thumbstick1
-			and
-			input.KeyCode ~=
-				Enum.KeyCode.Thumbstick2
-		then
-
-			return
-		end
-
-		if
-			input.Position.Magnitude >
-			0.65
-		then
-
-			SetLockButton(
-				input.KeyCode
-			)
-
-		end
-	end
-)
-
---============================================================
--- ESP
---============================================================
-
-local function GetTeamColor(
-	player
-)
-
-	if player.Team then
-
-		return player.Team.TeamColor.Color
-
-	end
-
-	return COLORS.White
-end
-
-local function RemoveESP(
-	player
-)
-
-	local data =
-		ESPObjects[player]
-
-	if not data then
-		return
-	end
-
-	if data.NameBillboard then
-		data.NameBillboard:Destroy()
-	end
-
-	if data.DistanceBillboard then
-		data.DistanceBillboard:Destroy()
-	end
-
-	if data.Highlight then
-		data.Highlight:Destroy()
-	end
-
-	ESPObjects[player] =
-		nil
-end
-
-local function ApplyESPColor(
-	data,
-	player
-)
-
-	if not data then
-		return
-	end
-
-	local color =
-		GetTeamColor(
-			player
-		)
-
-	if data.NameLabel then
-
-		data.NameLabel.TextColor3 =
-			color
-
-	end
-
-	if data.DistanceLabel then
-
-		data.DistanceLabel.TextColor3 =
-			color
-
-	end
-
-	if data.Highlight then
-
-		data.Highlight.OutlineColor =
-			color
-
-	end
-end
-
---============================================================
--- CREATE ESP
---============================================================
-
-local function CreateESP(
-	player
-)
-
-	if player == LocalPlayer then
-		return
-	end
-
-	RemoveESP(player)
-
-	if not Config.ESPEnabled then
-		return
-	end
-
-	if
-		Config.ESPWhitelistCheck
-		and IsWhitelisted(player)
-	then
-
-		return
-	end
-
-	local character =
-		player.Character
-
-	if not character then
-		return
-	end
-
-	local head =
-		character:FindFirstChild(
-			"Head"
-		)
-
-	local root =
-		character:FindFirstChild(
-			"HumanoidRootPart"
-		)
-
-	if not head or not root then
-		return
-	end
-
-	local data = {}
-
-	--========================================================
-	-- NAME
-	--========================================================
-
-	if Config.ESPShowName then
-
-		local billboard =
-			Create(
-				"BillboardGui",
-				{
-
-					Name =
-						"XenonName",
-
-					Parent = head,
-
-					Adornee = head,
-
-					Size =
-						UDim2.fromOffset(
-							180,
-							24
-						),
-
-					StudsOffset =
-						Vector3.new(
-							0,
-							2.8,
-							0
-						),
-
-					AlwaysOnTop = true,
-
-					ResetOnSpawn = false,
-				}
-			)
-
-		local label =
-			Create(
-				"TextLabel",
-				{
-
-					Parent = billboard,
-
-					Size =
-						UDim2.fromScale(
-							1,
-							1
-						),
-
-					BackgroundTransparency = 1,
-
-					Text =
-						player.Name,
-
-					Font =
-						Enum.Font.Gotham,
-
-					TextSize = 9,
-
-					TextColor3 =
-						GetTeamColor(
-							player
-						),
-
-					TextStrokeTransparency =
-						0.2,
-
-					TextStrokeColor3 =
-						COLORS.Black,
-				}
-			)
-
-		data.NameBillboard =
-			billboard
-
-		data.NameLabel =
-			label
-	end
-
-	--========================================================
-	-- DISTANCE
-	--========================================================
-
-	local distanceBillboard =
-		Create(
-			"BillboardGui",
-			{
-
-				Name =
-					"XenonDistance",
-
-				Parent = root,
-
-				Adornee = root,
-
-				Size =
-					UDim2.fromOffset(
-						180,
-						22
-					),
-
-				StudsOffset =
-					Vector3.new(
-						0,
-						-3,
-						0
-					),
-
-				AlwaysOnTop = true,
-
-				ResetOnSpawn = false,
-			}
-		)
-
-	local distanceLabel =
-		Create(
-			"TextLabel",
-			{
-
-				Parent =
-					distanceBillboard,
-
-				Size =
-					UDim2.fromScale(
-						1,
-						1
-					),
-
-				BackgroundTransparency = 1,
-
-				Text = "0 studs",
-
-				Font =
-					Enum.Font.Gotham,
-
-				TextSize = 9,
-
-				TextColor3 =
-					GetTeamColor(
-						player
-					),
-
-				TextStrokeTransparency =
-					0.2,
-
-				TextStrokeColor3 =
-					COLORS.Black,
-			}
-		)
-
-	data.DistanceBillboard =
-		distanceBillboard
-
-	data.DistanceLabel =
-		distanceLabel
-
-	--========================================================
-	-- HIGHLIGHT
-	--========================================================
-
-	if Config.ESPShowOutline then
-
-		local highlight =
-			Create(
-				"Highlight",
-				{
-
-					Name =
-						"XenonHighlight",
-
-					Parent =
-						character,
-
-					Adornee =
-						character,
-
-					DepthMode =
-						Enum.HighlightDepthMode.AlwaysOnTop,
-
-					FillTransparency = 1,
-
-					OutlineTransparency = 0,
-
-					OutlineColor =
-						GetTeamColor(
-							player
-						),
-				}
-			)
-
-		data.Highlight =
-			highlight
-	end
-
-	ESPObjects[player] =
-		data
-
-	ApplyESPColor(
-		data,
-		player
-	)
-end
-
---============================================================
--- REFRESH ESP
---============================================================
-
-local function RefreshESP(
-	player
-)
-
-	if player == LocalPlayer then
-		return
-	end
-
-	if not Config.ESPEnabled then
-
-		RemoveESP(player)
-
-		return
-	end
-
-	if
-		Config.ESPWhitelistCheck
-		and IsWhitelisted(player)
-	then
-
-		RemoveESP(player)
-
-		return
-	end
-
-	CreateESP(player)
-end
-
-local function RefreshAllESP()
-
-	for _, player in ipairs(
-		Players:GetPlayers()
-	) do
-
-		if player ~= LocalPlayer then
-
-			RefreshESP(player)
-
-		end
-	end
-end
-
---============================================================
--- PLAYER CONNECTIONS
---============================================================
-
-local function ConnectPlayer(
-	player
-)
-
-	if player == LocalPlayer then
-		return
-	end
-
-	PlayerConnections[player] =
-		PlayerConnections[player]
-		or {}
-
-	table.insert(
-		PlayerConnections[player],
-
-		player.CharacterAdded:Connect(
-			function()
-
-				task.wait(
-					0.15
-				)
-
-				RemoveESP(
-					player
-				)
-
-				if Config.ESPEnabled then
-
-					CreateESP(
-						player
-					)
-
-				end
-
-				-- Never retarget.
-				if LockedTarget ==
-					player
-				then
-
-					Unlock()
-
-				end
-			end
-		)
-	)
-
-	table.insert(
-		PlayerConnections[player],
-
-		player:GetPropertyChangedSignal(
-			"Team"
-		):Connect(
-			function()
-
-				local data =
-					ESPObjects[player]
-
-				if data then
-
-					ApplyESPColor(
-						data,
-						player
-					)
-
-				end
-			end
-		)
-	)
-end
-
-for _, player in ipairs(
-	Players:GetPlayers()
-) do
-
-	ConnectPlayer(player)
-
-end
-
-Players.PlayerAdded:Connect(
-	function(player)
-
-		ConnectPlayer(
-			player
-		)
-
-		task.wait(
-			0.2
-		)
-
-		RefreshESP(
-			player
-		)
-
-		RefreshWhitelistUI()
-	end
-)
-
-Players.PlayerRemoving:Connect(
-	function(player)
-
-		RemoveESP(player)
-
-		if LockedTarget ==
-			player
-		then
-
-			Unlock()
-
-		end
-
-		if PlayerConnections[player] then
-
-			for _, connection in ipairs(
-				PlayerConnections[player]
-			) do
-
-				pcall(function()
-
-					connection:Disconnect()
-
-				end)
-			end
-
-			PlayerConnections[player] =
-				nil
-		end
-
-		RefreshWhitelistUI()
-	end
-)
-
---============================================================
--- LOCAL CHARACTER
---============================================================
-
-LocalPlayer.CharacterAdded:Connect(
-	function()
-
-		Unlock()
-
-	end
-)
-
---============================================================
--- ESP UPDATE
---============================================================
-
-local ESPCounter = 0
-
-RunService.Heartbeat:Connect(
-	function()
-
-		if not Config.ESPEnabled then
-			return
-		end
-
-		ESPCounter += 1
-
-
-		if ESPCounter % 4 ~= 0 then
-			return
-		end
-
-		local localRoot =
-			GetLocalRoot()
-
-		if not localRoot then
-			return
-		end
-
-		for player, data in pairs(
-			ESPObjects
-		) do
-
-			if not player.Parent then
-
-				RemoveESP(
-					player
-				)
-
-				continue
-			end
-
-			if not IsAlive(player) then
-
-				RemoveESP(
-					player
-				)
-
-				continue
-			end
-
-			if
-				Config.ESPWhitelistCheck
-				and IsWhitelisted(player)
-			then
-
-				RemoveESP(
-					player
-				)
-
-				continue
-			end
-
-			local root =
-				player.Character
-				and
-				player.Character:FindFirstChild(
-					"HumanoidRootPart"
-				)
-
-			if root then
-
-				local distance =
-					(
-						root.Position -
-						localRoot.Position
-					).Magnitude
-
-				if data.DistanceLabel then
-
-					data.DistanceLabel.Text =
-						math.floor(
-							distance
-						)
-						..
-						" studs"
-
-				end
-			end
-
-			ApplyESPColor(
-				data,
-				player
-			)
-		end
-	end
-)
-
---============================================================
--- ESP WATCHER
---============================================================
-
-task.spawn(
-	function()
-
-		local lastEnabled =
-			Config.ESPEnabled
-
-		local lastName =
-			Config.ESPShowName
-
-		local lastOutline =
-			Config.ESPShowOutline
-
-		local lastWhitelist =
-			Config.ESPWhitelistCheck
-
-		while Gui.Parent do
-
-			task.wait(
-				0.2
-			)
-
-			if
-				lastEnabled ~=
-					Config.ESPEnabled
-				or
-				lastName ~=
-					Config.ESPShowName
-				or
-				lastOutline ~=
-					Config.ESPShowOutline
-				or
-				lastWhitelist ~=
-					Config.ESPWhitelistCheck
-			then
-
-				lastEnabled =
-					Config.ESPEnabled
-
-				lastName =
-					Config.ESPShowName
-
-				lastOutline =
-					Config.ESPShowOutline
-
-				lastWhitelist =
-					Config.ESPWhitelistCheck
-
-				RefreshAllESP()
-
-			end
-		end
-	end
-)
-
---============================================================
--- CAMERA LOCK
---============================================================
-
-RunService:BindToRenderStep(
-	"XenonCameraLock",
-
-	Enum.RenderPriority.Last.Value,
-
-	function()
-
-		if not Locked then
-
-			Status.Text =
-				"READY"
-
-			Status.TextColor3 =
-				COLORS.Gray
-
-			return
-		end
-
-		--====================================================
-		-- NEVER RETARGET
-		--====================================================
-
-		if not LockedTarget then
-
-			Unlock()
-
-			return
-		end
-
-		if not IsValidTarget(
-			LockedTarget
-		) then
-
-			Unlock()
-
-			return
-		end
-
-		local aimPosition =
-			GetAimPosition(
-				LockedTarget
-			)
-
-		if not aimPosition then
-
-			Unlock()
-
-			return
-		end
-
-		local cameraPosition =
-			Camera.CFrame.Position
-
-		local desired =
-			CFrame.lookAt(
-				cameraPosition,
-				aimPosition
-			)
-
-		--====================================================
-		-- SMOOTHING
-		--====================================================
-
-		if Config.Smoothing <= 0 then
-
-			Camera.CFrame =
-				desired
-
-		else
-
-			local alpha =
-				math.clamp(
-					1 / Config.Smoothing,
-					0.01,
-					1
-				)
-
-			Camera.CFrame =
-				Camera.CFrame:Lerp(
-					desired,
-					alpha
-				)
-		end
-
-		Status.Text =
-			"LOCKED"
-
-		Status.TextColor3 =
-			COLORS.Red
-	end
-)
-
---============================================================
+--==============================================================
 -- CLEANUP
---============================================================
-
-local Cleaned = false
+--==============================================================
 
 _G.XenonCleanup = function()
 
-	if Cleaned then
-		return
-	end
+    pcall(function()
+        RunService:UnbindFromRenderStep(
+            "XenonCameraLock"
+        )
+    end)
 
-	Cleaned = true
+    for Player in pairs(ESPObjects) do
+        DestroyESP(Player)
+    end
 
-	Unlock()
+    DisconnectAll()
 
-	pcall(function()
+    local Gui =
+        PlayerGui:FindFirstChild(
+            "Xenon"
+        )
 
-		RunService:UnbindFromRenderStep(
-			"XenonCameraLock"
-		)
+    if Gui then
+        Gui:Destroy()
+    end
 
-	end)
-
-	for player, connections in pairs(
-		PlayerConnections
-	) do
-
-		for _, connection in ipairs(
-			connections
-		) do
-
-			pcall(function()
-
-				connection:Disconnect()
-
-			end)
-		end
-
-		PlayerConnections[player] =
-			nil
-	end
-
-	for player in pairs(
-		ESPObjects
-	) do
-
-		RemoveESP(
-			player
-		)
-
-	end
-
-	pcall(function()
-
-		Gui:Destroy()
-
-	end)
-
-	_G.XenonCleanup = nil
+    _G.XenonCleanup = nil
 end
 
---============================================================
--- INITIAL ESP
---============================================================
+--==============================================================
+-- INITIAL STATUS
+--==============================================================
 
-if Config.ESPEnabled then
+UpdateStatus()
 
-	RefreshAllESP()
-
-end
-
---============================================================
--- START
---============================================================
-
-SetTab("AIM")
-
-print(
-	"Xenon loaded"
-)
-
-print(
-	"Third person target: UpperTorso/Torso"
-)
-
-print(
-	"Local-Y downward correction enabled"
-)
-
-print(
-	"Controller lock:",
-	Config.LockButton.Name
-)
+print("======================================")
+print("XENON LOADED")
+print("3P Offset:", Config.AimOffset)
+print("Lock Button:", Config.LockButton.Name)
+print("Sticky Aim:", Config.StickyAim)
+print("Aimbot Whitelist Skip:",
+    Config.AimbotWhitelistSkip)
+print("ESP:", Config.ESPEnabled)
+print("Whitelist entries:",
+    tostring(#Players:GetPlayers() - 1))
+print("======================================")
