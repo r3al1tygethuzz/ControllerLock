@@ -2063,6 +2063,19 @@ CreateDropdown(
 
 CreateTextBox(
 	AimPage,
+	"Aim Offset",
+	"Third-person downward offset",
+	Config.AimOffset,
+	function(value)
+
+		Config.AimOffset =
+			value
+
+	end
+)
+
+CreateTextBox(
+	AimPage,
 	"Smoothing",
 	"0 = instant",
 	Config.Smoothing,
