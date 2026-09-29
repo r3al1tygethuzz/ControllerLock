@@ -1,7 +1,7 @@
 --============================================================
 -- XENON
--- CONTROLLER CAMERA LOCK / ESP
--- FIXED AIM-POINT METHOD
+-- CONTROLLER CAMERA LOCK + ESP
+-- FIXED BODY AIM + LOCAL-Y HEIGHT CORRECTION
 --============================================================
 
 --============================================================
@@ -30,10 +30,10 @@ pcall(function()
 	RunService:UnbindFromRenderStep("XenonCameraLock")
 end)
 
-local ExistingGui = PlayerGui:FindFirstChild("Xenon")
+local OldGui = PlayerGui:FindFirstChild("Xenon")
 
-if ExistingGui then
-	ExistingGui:Destroy()
+if OldGui then
+	OldGui:Destroy()
 end
 
 --============================================================
@@ -42,27 +42,48 @@ end
 
 local Config = {
 
-	-- Controller
+	-- Controller lock button
 	LockButton = Enum.KeyCode.ButtonY,
 
 	-- Camera
 	CameraMode = "Third Person",
 
-	-- Fixed third-person vertical aim offset
-	-- Positive = below root
-	-- Negative = above root
-	AimOffset = 23.5,
-
 	-- Prediction
+	-- X = normal
+	-- Y = inverted
+	-- Z = none
 	PredictionX = 0.08,
 	PredictionY = 0.08,
 
 	-- Camera smoothing
+	-- 0 = instant
 	Smoothing = 0,
 
-	-- Targeting
+	-- Maximum target distance
 	MaxTargetDistance = 500,
+
+	-- New-lock targeting
+	-- ON  = closest to screen center
+	-- OFF = closest physical player
 	StickyAim = true,
+
+	--========================================================
+	-- LOCAL PLAYER ABOVE TARGET CORRECTION
+	--========================================================
+	--
+	-- If LocalPlayer Y > Target Y:
+	--
+	-- Difference = LocalY - TargetY
+	--
+	-- Aim is moved DOWN by:
+	--
+	-- Difference * AboveTargetStrength
+	--
+	-- capped by AboveTargetMaxCorrection.
+	--
+	AboveTargetCorrection = true,
+	AboveTargetStrength = 0.35,
+	AboveTargetMaxCorrection = 20,
 
 	-- Whitelist
 	AimbotWhitelistSkip = true,
@@ -81,10 +102,6 @@ local Config = {
 local Locked = false
 local LockedTarget = nil
 
--- THIS IS THE IMPORTANT PART
--- The aim offset is captured once when locking.
-local LockedAimOffset = 0
-
 local CurrentTab = "AIM"
 local UIVisible = true
 local Rebinding = false
@@ -101,15 +118,21 @@ local WhitelistFile = "XenonWhitelist.json"
 --============================================================
 
 local COLORS = {
-	Background = Color3.fromRGB(9, 9, 9),
+
+	Background = Color3.fromRGB(8, 8, 8),
+
 	Panel = Color3.fromRGB(15, 15, 15),
+
 	Panel2 = Color3.fromRGB(23, 23, 23),
 
 	White = Color3.fromRGB(245, 245, 245),
+
 	Gray = Color3.fromRGB(145, 145, 145),
+
 	DarkGray = Color3.fromRGB(48, 48, 48),
 
-	Red = Color3.fromRGB(215, 35, 35),
+	Red = Color3.fromRGB(220, 35, 35),
+
 	Black = Color3.fromRGB(0, 0, 0),
 }
 
@@ -163,7 +186,15 @@ local function AddStroke(
 end
 
 --============================================================
--- PLAYER CHECKS
+-- DEVICE
+--============================================================
+
+local IsPhone =
+	UserInputService.TouchEnabled
+	and not GuiService:IsTenFootInterface()
+
+--============================================================
+-- PLAYER HELPERS
 --============================================================
 
 local function IsAlive(player)
@@ -172,7 +203,8 @@ local function IsAlive(player)
 		return false
 	end
 
-	local character = player.Character
+	local character =
+		player.Character
 
 	if not character then
 		return false
@@ -218,10 +250,9 @@ local function IsWhitelisted(player)
 		return false
 	end
 
-	return
-		Whitelist[
-			tostring(player.UserId)
-		] == true
+	return Whitelist[
+		tostring(player.UserId)
+	] == true
 end
 
 --============================================================
@@ -237,9 +268,12 @@ local function LoadWhitelist()
 	local exists = false
 
 	pcall(function()
-		exists = isfile(
-			WhitelistFile
-		)
+
+		exists =
+			isfile(
+				WhitelistFile
+			)
+
 	end)
 
 	if not exists then
@@ -249,9 +283,12 @@ local function LoadWhitelist()
 	local content
 
 	pcall(function()
-		content = readfile(
-			WhitelistFile
-		)
+
+		content =
+			readfile(
+				WhitelistFile
+			)
+
 	end)
 
 	if not content then
@@ -260,20 +297,26 @@ local function LoadWhitelist()
 
 	local success, data =
 		pcall(function()
+
 			return HttpService:JSONDecode(
 				content
 			)
+
 		end)
 
-	if success and type(data) == "table" then
+	if not success then
+		return
+	end
 
-		for _, userId in ipairs(data) do
+	if type(data) ~= "table" then
+		return
+	end
 
-			Whitelist[
-				tostring(userId)
-			] = true
+	for _, userId in ipairs(data) do
 
-		end
+		Whitelist[
+			tostring(userId)
+		] = true
 
 	end
 end
@@ -295,37 +338,36 @@ local function SaveWhitelist()
 	) do
 
 		if enabled then
+
 			table.insert(
 				list,
 				tonumber(userId)
 			)
-		end
 
+		end
 	end
 
-	local encoded
-
-	pcall(function()
-
-		encoded =
-			HttpService:JSONEncode(
-				list
-			)
-
-	end)
-
-	if encoded then
-
+	local success, encoded =
 		pcall(function()
 
-			writefile(
-				WhitelistFile,
-				encoded
+			return HttpService:JSONEncode(
+				list
 			)
 
 		end)
 
+	if not success then
+		return
 	end
+
+	pcall(function()
+
+		writefile(
+			WhitelistFile,
+			encoded
+		)
+
+	end)
 end
 
 LoadWhitelist()
@@ -355,7 +397,7 @@ local function GetPredictedPosition(
 			Config.PredictionY
 		)
 
-	-- Z = NO prediction
+	-- Z = no prediction
 	local Z =
 		position.Z
 
@@ -367,60 +409,109 @@ local function GetPredictedPosition(
 end
 
 --============================================================
--- FIXED AIM POSITION
+-- THIRD PERSON AIM PART
 --============================================================
 
-local function GetFixedThirdPersonAimPosition(
-	player
+local function GetThirdPersonAimPart(
+	character
 )
 
-	if not player then
-		return nil
-	end
-
-	local character =
-		player.Character
-
-	if not character then
-		return nil
-	end
-
-	local root =
+	-- R15
+	local upperTorso =
 		character:FindFirstChild(
-			"HumanoidRootPart"
+			"UpperTorso"
 		)
 
-	if not root then
-		return nil
+	if upperTorso then
+		return upperTorso
 	end
 
-	-- Prediction happens from root.
-	local predicted =
-		GetPredictedPosition(
-			root.Position,
-			root.AssemblyLinearVelocity
+	-- R6
+	local torso =
+		character:FindFirstChild(
+			"Torso"
 		)
 
-	-- IMPORTANT:
-	-- This is a FIXED world-space vertical offset.
+	if torso then
+		return torso
+	end
+
+	-- Fallback
+	return character:FindFirstChild(
+		"HumanoidRootPart"
+	)
+end
+
+--============================================================
+-- LOCAL-Y CORRECTION
+--============================================================
+
+local function ApplyHeightCorrection(
+	aimPosition,
+	targetPosition
+)
+
+	if not Config.AboveTargetCorrection then
+		return aimPosition
+	end
+
+	local localRoot =
+		GetLocalRoot()
+
+	if not localRoot then
+		return aimPosition
+	end
+
+	--========================================================
+	-- IMPORTANT
+	--========================================================
 	--
-	-- It does NOT:
-	-- * use camera height
-	-- * use target distance
-	-- * adapt every frame
-	-- * move upward because the camera is above target
+	-- Only correct if the LOCAL PLAYER is physically higher
+	-- than the target.
 	--
-	-- The same offset is maintained for the
-	-- entire lock.
-	local aimPosition =
-		predicted +
+	-- Example:
+	--
+	-- Local Y = 120
+	-- Target Y = 110
+	--
+	-- Difference = 10
+	--
+	-- Correction = 10 * 0.35 = 3.5 studs DOWN
+	--
+	-- This correction does NOT depend on distance.
+	--========================================================
+
+	local localY =
+		localRoot.Position.Y
+
+	local targetY =
+		targetPosition.Y
+
+	local difference =
+		localY - targetY
+
+	if difference <= 0 then
+		return aimPosition
+	end
+
+	local correction =
+		difference *
+		Config.AboveTargetStrength
+
+	correction =
+		math.clamp(
+			correction,
+			0,
+			Config.AboveTargetMaxCorrection
+		)
+
+	-- Move aim DOWN.
+	return aimPosition -
 		Vector3.new(
 			0,
-			-LockedAimOffset,
+			correction,
 			0
 		)
-
-	return aimPosition
 end
 
 --============================================================
@@ -430,10 +521,6 @@ end
 local function GetFirstPersonAimPosition(
 	player
 )
-
-	if not player then
-		return nil
-	end
 
 	local character =
 		player.Character
@@ -451,10 +538,54 @@ local function GetFirstPersonAimPosition(
 		return nil
 	end
 
-	return GetPredictedPosition(
-		head.Position,
-		head.AssemblyLinearVelocity
-	)
+	local predicted =
+		GetPredictedPosition(
+			head.Position,
+			head.AssemblyLinearVelocity
+		)
+
+	return predicted
+end
+
+--============================================================
+-- THIRD PERSON AIM
+--============================================================
+
+local function GetThirdPersonAimPosition(
+	player
+)
+
+	local character =
+		player.Character
+
+	if not character then
+		return nil
+	end
+
+	local aimPart =
+		GetThirdPersonAimPart(
+			character
+		)
+
+	if not aimPart then
+		return nil
+	end
+
+	-- Predict the body part itself.
+	local predicted =
+		GetPredictedPosition(
+			aimPart.Position,
+			aimPart.AssemblyLinearVelocity
+		)
+
+	-- Apply ONLY local-player-height correction.
+	local corrected =
+		ApplyHeightCorrection(
+			predicted,
+			predicted
+		)
+
+	return corrected
 end
 
 --============================================================
@@ -481,7 +612,7 @@ local function GetAimPosition(player)
 
 	end
 
-	return GetFixedThirdPersonAimPosition(
+	return GetThirdPersonAimPosition(
 		player
 	)
 end
@@ -500,9 +631,11 @@ local function IsValidTarget(player)
 		return false
 	end
 
-	if Config.AimbotWhitelistSkip
+	if
+		Config.AimbotWhitelistSkip
 		and IsWhitelisted(player)
 	then
+
 		return false
 	end
 
@@ -542,6 +675,7 @@ local function IsValidTarget(player)
 	if distance >
 		Config.MaxTargetDistance
 	then
+
 		return false
 	end
 
@@ -555,7 +689,7 @@ end
 local function FindTarget()
 
 	local bestPlayer = nil
-	local bestDistance = math.huge
+	local bestScore = math.huge
 
 	local localRoot =
 		GetLocalRoot()
@@ -592,9 +726,6 @@ local function FindTarget()
 
 				if Config.StickyAim then
 
-					-- New lock:
-					-- choose the player closest
-					-- to screen center.
 					local screenPosition,
 						visible =
 						Camera:WorldToViewportPoint(
@@ -614,10 +745,10 @@ local function FindTarget()
 							).Magnitude
 
 						if screenDistance <
-							bestDistance
+							bestScore
 						then
 
-							bestDistance =
+							bestScore =
 								screenDistance
 
 							bestPlayer =
@@ -627,8 +758,6 @@ local function FindTarget()
 
 				else
 
-					-- New lock:
-					-- physical distance only.
 					local physicalDistance =
 						(
 							root.Position -
@@ -636,10 +765,10 @@ local function FindTarget()
 						).Magnitude
 
 					if physicalDistance <
-						bestDistance
+						bestScore
 					then
 
-						bestDistance =
+						bestScore =
 							physicalDistance
 
 						bestPlayer =
@@ -661,16 +790,15 @@ local function Unlock()
 
 	Locked = false
 	LockedTarget = nil
-
-	-- Reset captured offset.
-	LockedAimOffset = 0
 end
 
 --============================================================
 -- LOCK
 --============================================================
 
-local function LockTarget(target)
+local function LockTarget(
+	target
+)
 
 	if not target then
 		return
@@ -679,38 +807,6 @@ local function LockTarget(target)
 	if not IsValidTarget(target) then
 		return
 	end
-
-	local character =
-		target.Character
-
-	if not character then
-		return
-	end
-
-	local root =
-		character:FindFirstChild(
-			"HumanoidRootPart"
-		)
-
-	if not root then
-		return
-	end
-
-	--========================================================
-	-- CAPTURE THE AIM POINT ONCE
-	--========================================================
-	--
-	-- From this point onward the vertical offset does not
-	-- depend on camera height or target distance.
-	--
-	-- If AimOffset = 23.5:
-	--
-	-- Root Y - 23.5
-	--
-	-- remains the vertical target point for the lock.
-	--
-	LockedAimOffset =
-		Config.AimOffset
 
 	LockedTarget =
 		target
@@ -751,35 +847,26 @@ end
 -- GUI
 --============================================================
 
-local Gui = Create("ScreenGui", {
+local Gui = Create(
+	"ScreenGui",
+	{
 
-	Name = "Xenon",
+		Name = "Xenon",
 
-	Parent = PlayerGui,
+		Parent = PlayerGui,
 
-	ResetOnSpawn = false,
+		ResetOnSpawn = false,
 
-	IgnoreGuiInset = true,
+		IgnoreGuiInset = true,
 
-	ZIndexBehavior =
-		Enum.ZIndexBehavior.Global,
+		ZIndexBehavior =
+			Enum.ZIndexBehavior.Global,
 
-	DisplayOrder = 1000000,
+		DisplayOrder = 1000000,
 
-	Enabled = true,
-})
-
---============================================================
--- DEVICE DETECTION
---============================================================
-
-local IsPhone =
-	UserInputService.TouchEnabled
-	and not GuiService:IsTenFootInterface()
-
-local IsControllerPhone =
-	IsPhone
-	and UserInputService.GamepadEnabled
+		Enabled = true,
+	}
+)
 
 --============================================================
 -- RESPONSIVE SIZE
@@ -799,29 +886,26 @@ local WindowHeight
 
 if IsPhone then
 
-	-- VERY COMPACT PHONE MODE
-
+	-- Compact controller-phone layout.
 	WindowWidth =
 		math.min(
-			260,
+			270,
 			math.max(
 				235,
-				screenWidth - 24
+				screenWidth - 20
 			)
 		)
 
 	WindowHeight =
 		math.min(
-			305,
+			315,
 			math.max(
-				275,
-				screenHeight - 24
+				270,
+				screenHeight - 20
 			)
 		)
 
 else
-
-	-- PC
 
 	WindowWidth = 380
 	WindowHeight = 520
@@ -829,231 +913,231 @@ else
 end
 
 --============================================================
--- MAIN WINDOW
+-- MAIN
 --============================================================
 
-local Main = Create("Frame", {
+local Main = Create(
+	"Frame",
+	{
 
-	Name = "Main",
+		Name = "Main",
 
-	Parent = Gui,
+		Parent = Gui,
 
-	Size =
-		UDim2.fromOffset(
-			WindowWidth,
-			WindowHeight
-		),
+		Size =
+			UDim2.fromOffset(
+				WindowWidth,
+				WindowHeight
+			),
 
-	Position =
-		UDim2.new(
-			0.5,
-			-WindowWidth / 2,
-			0.5,
-			-WindowHeight / 2
-		),
+		Position =
+			UDim2.new(
+				0.5,
+				-WindowWidth / 2,
+				0.5,
+				-WindowHeight / 2
+			),
 
-	BackgroundColor3 =
-		COLORS.Background,
+		BackgroundColor3 =
+			COLORS.Background,
 
-	BorderSizePixel = 0,
+		BorderSizePixel = 0,
 
-	ClipsDescendants = true,
+		ClipsDescendants = true,
 
-	ZIndex = 100,
-})
+		ZIndex = 100,
+	}
+)
 
 Round(
 	Main,
-	IsPhone and 11 or 14
+	IsPhone and 12 or 14
 )
 
 AddStroke(
 	Main,
 	COLORS.DarkGray,
-	0.2,
+	0.15,
 	1
 )
 
 --============================================================
--- UI DIMENSIONS
+-- DIMENSIONS
 --============================================================
 
-local TopHeight
-local TabHeight
-local PageTop
+local TopHeight =
+	IsPhone and 34 or 42
 
-if IsPhone then
+local TabHeight =
+	IsPhone and 29 or 36
 
-	TopHeight = 34
-	TabHeight = 30
-	PageTop = 72
-
-else
-
-	TopHeight = 42
-	TabHeight = 36
-	PageTop = 92
-
-end
+local PageTop =
+	IsPhone and 70 or 91
 
 --============================================================
 -- TOP BAR
 --============================================================
 
-local TopBar = Create("Frame", {
+local TopBar = Create(
+	"Frame",
+	{
 
-	Name = "TopBar",
+		Parent = Main,
 
-	Parent = Main,
+		Size =
+			UDim2.new(
+				1,
+				-10,
+				0,
+				TopHeight
+			),
 
-	Size =
-		UDim2.new(
-			1,
-			-10,
-			0,
-			TopHeight
-		),
+		Position =
+			UDim2.fromOffset(
+				5,
+				5
+			),
 
-	Position =
-		UDim2.fromOffset(
-			5,
-			5
-		),
+		BackgroundColor3 =
+			COLORS.Panel,
 
-	BackgroundColor3 =
-		COLORS.Panel,
+		BorderSizePixel = 0,
 
-	BorderSizePixel = 0,
-
-	ZIndex = 101,
-})
+		ZIndex = 101,
+	}
+)
 
 Round(
 	TopBar,
-	IsPhone and 8 or 11
+	IsPhone and 8 or 10
 )
 
 --============================================================
 -- TITLE
 --============================================================
 
-local Title = Create("TextLabel", {
+Create(
+	"TextLabel",
+	{
 
-	Parent = TopBar,
+		Parent = TopBar,
 
-	Size =
-		UDim2.new(
-			1,
-			-55,
-			1,
-			0
-		),
+		Size =
+			UDim2.new(
+				1,
+				-55,
+				1,
+				0
+			),
 
-	Position =
-		UDim2.fromOffset(
-			IsPhone and 9 or 14,
-			0
-		),
+		Position =
+			UDim2.fromOffset(
+				IsPhone and 8 or 13,
+				0
+			),
 
-	BackgroundTransparency = 1,
+		BackgroundTransparency = 1,
 
-	Text = "XENON",
+		Text = "XENON",
 
-	Font =
-		Enum.Font.GothamBold,
+		Font =
+			Enum.Font.GothamBold,
 
-	TextSize =
-		IsPhone and 12 or 16,
+		TextSize =
+			IsPhone and 12 or 16,
 
-	TextColor3 =
-		COLORS.White,
+		TextColor3 =
+			COLORS.White,
 
-	TextXAlignment =
-		Enum.TextXAlignment.Left,
+		TextXAlignment =
+			Enum.TextXAlignment.Left,
 
-	ZIndex = 102,
-})
+		ZIndex = 102,
+	}
+)
 
---============================================================
--- STATUS
---============================================================
+local Status = Create(
+	"TextLabel",
+	{
 
-local Status = Create("TextLabel", {
+		Parent = TopBar,
 
-	Parent = TopBar,
+		Size =
+			UDim2.fromOffset(
+				IsPhone and 42 or 60,
+				18
+			),
 
-	Size =
-		UDim2.fromOffset(
-			IsPhone and 48 or 65,
-			18
-		),
+		Position =
+			UDim2.new(
+				1,
+				IsPhone and -73 or -92,
+				0.5,
+				-9
+			),
 
-	Position =
-		UDim2.new(
-			1,
-			IsPhone and -83 or -100,
-			0.5,
-			-9
-		),
+		BackgroundTransparency = 1,
 
-	BackgroundTransparency = 1,
+		Text = "READY",
 
-	Text = "READY",
+		Font =
+			Enum.Font.GothamBold,
 
-	Font =
-		Enum.Font.GothamBold,
+		TextSize =
+			IsPhone and 7 or 9,
 
-	TextSize =
-		IsPhone and 7 or 9,
+		TextColor3 =
+			COLORS.Gray,
 
-	TextColor3 =
-		COLORS.Gray,
-
-	ZIndex = 102,
-})
+		ZIndex = 102,
+	}
+)
 
 --============================================================
 -- CLOSE
 --============================================================
 
-local Close = Create("TextButton", {
+local Close = Create(
+	"TextButton",
+	{
 
-	Parent = TopBar,
+		Parent = TopBar,
 
-	Size =
-		UDim2.fromOffset(
-			IsPhone and 25 or 32,
-			IsPhone and 25 or 32
-		),
+		Size =
+			UDim2.fromOffset(
+				IsPhone and 24 or 31,
+				IsPhone and 24 or 31
+			),
 
-	Position =
-		UDim2.new(
-			1,
-			IsPhone and -28 or -36,
-			0.5,
-			IsPhone and -12.5 or -16
-		),
+		Position =
+			UDim2.new(
+				1,
+				IsPhone and -28 or -36,
+				0.5,
+				IsPhone and -12 or -15.5
+			),
 
-	BackgroundColor3 =
-		COLORS.Panel2,
+		BackgroundColor3 =
+			COLORS.Panel2,
 
-	BorderSizePixel = 0,
+		BorderSizePixel = 0,
 
-	Text = "×",
+		Text = "×",
 
-	Font =
-		Enum.Font.GothamBold,
+		Font =
+			Enum.Font.GothamBold,
 
-	TextSize =
-		IsPhone and 15 or 20,
+		TextSize =
+			IsPhone and 15 or 20,
 
-	TextColor3 =
-		COLORS.White,
+		TextColor3 =
+			COLORS.White,
 
-	AutoButtonColor = false,
+		AutoButtonColor = false,
 
-	ZIndex = 103,
-})
+		ZIndex = 103,
+	}
+)
 
 Round(
 	Close,
@@ -1061,60 +1145,64 @@ Round(
 )
 
 --============================================================
--- TAB BAR
+-- TABS
 --============================================================
 
-local TabBar = Create("Frame", {
+local TabBar = Create(
+	"Frame",
+	{
 
-	Name = "TabBar",
+		Parent = Main,
 
-	Parent = Main,
+		Size =
+			UDim2.new(
+				1,
+				-12,
+				0,
+				TabHeight
+			),
 
-	Size =
-		UDim2.new(
-			1,
-			-12,
-			0,
-			TabHeight
-		),
+		Position =
+			UDim2.fromOffset(
+				6,
+				TopHeight + 10
+			),
 
-	Position =
-		UDim2.fromOffset(
-			6,
-			TopHeight + 10
-		),
+		BackgroundColor3 =
+			COLORS.Panel,
 
-	BackgroundColor3 =
-		COLORS.Panel,
+		BorderSizePixel = 0,
 
-	BorderSizePixel = 0,
-
-	ZIndex = 101,
-})
+		ZIndex = 101,
+	}
+)
 
 Round(
 	TabBar,
 	IsPhone and 8 or 10
 )
 
-Create("UIPadding", {
+Create(
+	"UIPadding",
+	{
 
-	Parent = TabBar,
+		Parent = TabBar,
 
-	PaddingLeft =
-		UDim.new(0, 3),
+		PaddingLeft =
+			UDim.new(0, 3),
 
-	PaddingRight =
-		UDim.new(0, 3),
+		PaddingRight =
+			UDim.new(0, 3),
 
-	PaddingTop =
-		UDim.new(0, 3),
+		PaddingTop =
+			UDim.new(0, 3),
 
-	PaddingBottom =
-		UDim.new(0, 3),
-})
+		PaddingBottom =
+			UDim.new(0, 3),
+	}
+)
 
-local TabLayout = Create(
+Create(
 	"UIListLayout",
 	{
 
@@ -1132,7 +1220,7 @@ local TabLayout = Create(
 		Padding =
 			UDim.new(
 				0,
-				IsPhone and 2 or 3
+				2
 			),
 
 		SortOrder =
@@ -1147,23 +1235,16 @@ local function CreateTab(
 	order
 )
 
-	local availableWidth =
-		WindowWidth - 24
-
 	local tabWidth =
 		math.floor(
-			availableWidth / 3
+			(WindowWidth - 28) / 3
 		)
 
 	local button = Create(
 		"TextButton",
 		{
 
-			Name =
-				name .. "Tab",
-
-			Parent =
-				TabBar,
+			Parent = TabBar,
 
 			Size =
 				UDim2.fromOffset(
@@ -1223,7 +1304,7 @@ local function CreateTab(
 				),
 
 			BackgroundColor3 =
-				COLORS.Red,
+				COLORS.White,
 
 			BorderSizePixel = 0,
 
@@ -1233,10 +1314,12 @@ local function CreateTab(
 		}
 	)
 
-	Round(indicator, 2)
+	Round(
+		indicator,
+		2
+	)
 
 	TabButtons[name] = {
-
 		Button = button,
 		Indicator = indicator,
 	}
@@ -1252,46 +1335,39 @@ CreateTab("WHITELIST", 3)
 -- PAGES
 --============================================================
 
-local Pages = Create("Frame", {
+local Pages = Create(
+	"Frame",
+	{
 
-	Name = "Pages",
+		Parent = Main,
 
-	Parent = Main,
+		Size =
+			UDim2.new(
+				1,
+				-12,
+				1,
+				-(PageTop + 5)
+			),
 
-	Size =
-		UDim2.new(
-			1,
-			-12,
-			1,
-			-(PageTop + 6)
-		),
+		Position =
+			UDim2.fromOffset(
+				6,
+				PageTop
+			),
 
-	Position =
-		UDim2.fromOffset(
-			6,
-			PageTop
-		),
+		BackgroundTransparency = 1,
 
-	BackgroundTransparency = 1,
+		ZIndex = 101,
+	}
+)
 
-	ZIndex = 101,
-})
-
---============================================================
--- CREATE PAGE
---============================================================
-
-local function CreatePage(name)
+local function CreatePage()
 
 	local page = Create(
 		"ScrollingFrame",
 		{
 
-			Name =
-				name .. "Page",
-
-			Parent =
-				Pages,
+			Parent = Pages,
 
 			Size =
 				UDim2.fromScale(
@@ -1338,20 +1414,26 @@ local function CreatePage(name)
 			PaddingLeft =
 				UDim.new(
 					0,
-					IsPhone and 1 or 2
+					1
 				),
 
 			PaddingRight =
 				UDim.new(
 					0,
-					IsPhone and 1 or 2
+					1
 				),
 
 			PaddingTop =
-				UDim.new(0, 1),
+				UDim.new(
+					0,
+					1
+				),
 
 			PaddingBottom =
-				UDim.new(0, 5),
+				UDim.new(
+					0,
+					5
+				),
 		}
 	)
 
@@ -1376,13 +1458,13 @@ local function CreatePage(name)
 end
 
 local AimPage =
-	CreatePage("AIM")
+	CreatePage()
 
 local ESPPage =
-	CreatePage("ESP")
+	CreatePage()
 
 local WhitelistPage =
-	CreatePage("WHITELIST")
+	CreatePage()
 
 --============================================================
 -- UI HELPERS
@@ -1404,7 +1486,7 @@ local function CreateSection(
 					1,
 					-2,
 					0,
-					IsPhone and 16 or 22
+					IsPhone and 15 or 21
 				),
 
 			BackgroundTransparency = 1,
@@ -1439,7 +1521,7 @@ local function CreateRow(
 )
 
 	local rowHeight =
-		IsPhone and 35 or 44
+		IsPhone and 34 or 43
 
 	local row = Create(
 		"Frame",
@@ -1478,15 +1560,15 @@ local function CreateRow(
 			Size =
 				UDim2.new(
 					1,
-					-90,
+					-88,
 					0,
-					IsPhone and 16 or 19
+					16
 				),
 
 			Position =
 				UDim2.fromOffset(
 					IsPhone and 8 or 10,
-					IsPhone and 2 or 4
+					2
 				),
 
 			BackgroundTransparency = 1,
@@ -1518,15 +1600,15 @@ local function CreateRow(
 			Size =
 				UDim2.new(
 					1,
-					-90,
+					-88,
 					0,
-					IsPhone and 12 or 15
+					11
 				),
 
 			Position =
 				UDim2.fromOffset(
 					IsPhone and 8 or 10,
-					IsPhone and 17 or 23
+					18
 				),
 
 			BackgroundTransparency = 1,
@@ -1579,16 +1661,16 @@ local function CreateToggle(
 
 			Size =
 				UDim2.fromOffset(
-					IsPhone and 45 or 54,
-					IsPhone and 22 or 25
+					IsPhone and 44 or 53,
+					IsPhone and 21 or 25
 				),
 
 			Position =
 				UDim2.new(
 					1,
-					IsPhone and -53 or -64,
+					IsPhone and -51 or -62,
 					0.5,
-					IsPhone and -11 or -12.5
+					IsPhone and -10.5 or -12.5
 				),
 
 			BackgroundColor3 =
@@ -1620,12 +1702,15 @@ local function CreateToggle(
 
 	Round(
 		button,
-		IsPhone and 7 or 8
+		IsPhone and 6 or 8
 	)
 
-	local state = initial
+	local state =
+		initial
 
-	local function Update(value)
+	local function Update(
+		value
+	)
 
 		state = value
 
@@ -1646,11 +1731,15 @@ local function CreateToggle(
 
 	button.Activated:Connect(
 		function()
-			Update(not state)
+
+			Update(
+				not state
+			)
+
 		end
 	)
 
-	return row, button, Update
+	return row
 end
 
 --============================================================
@@ -1680,16 +1769,16 @@ local function CreateTextBox(
 
 			Size =
 				UDim2.fromOffset(
-					IsPhone and 55 or 72,
-					IsPhone and 22 or 27
+					IsPhone and 52 or 70,
+					IsPhone and 21 or 26
 				),
 
 			Position =
 				UDim2.new(
 					1,
-					IsPhone and -63 or -82,
+					IsPhone and -60 or -80,
 					0.5,
-					IsPhone and -11 or -13.5
+					IsPhone and -10.5 or -13
 				),
 
 			BackgroundColor3 =
@@ -1726,7 +1815,7 @@ local function CreateTextBox(
 	AddStroke(
 		box,
 		COLORS.DarkGray,
-		0.3,
+		0.25,
 		1
 	)
 
@@ -1742,6 +1831,9 @@ local function CreateTextBox(
 
 				callback(number)
 
+				box.Text =
+					tostring(number)
+
 			else
 
 				box.Text =
@@ -1751,7 +1843,7 @@ local function CreateTextBox(
 		end
 	)
 
-	return row, box
+	return row
 end
 
 --============================================================
@@ -1782,16 +1874,16 @@ local function CreateDropdown(
 
 			Size =
 				UDim2.fromOffset(
-					IsPhone and 82 or 110,
-					IsPhone and 22 or 27
+					IsPhone and 78 or 105,
+					IsPhone and 21 or 26
 				),
 
 			Position =
 				UDim2.new(
 					1,
-					IsPhone and -90 or -120,
+					IsPhone and -86 or -115,
 					0.5,
-					IsPhone and -11 or -13.5
+					IsPhone and -10.5 or -13
 				),
 
 			BackgroundColor3 =
@@ -1854,11 +1946,11 @@ local function CreateDropdown(
 		end
 	)
 
-	return row, button
+	return row
 end
 
 --============================================================
--- ACTION BUTTON
+-- ACTION
 --============================================================
 
 local function CreateAction(
@@ -1884,16 +1976,16 @@ local function CreateAction(
 
 			Size =
 				UDim2.fromOffset(
-					IsPhone and 75 or 100,
-					IsPhone and 22 or 27
+					IsPhone and 72 or 98,
+					IsPhone and 21 or 26
 				),
 
 			Position =
 				UDim2.new(
 					1,
-					IsPhone and -83 or -110,
+					IsPhone and -80 or -108,
 					0.5,
-					IsPhone and -11 or -13.5
+					IsPhone and -10.5 or -13
 				),
 
 			BackgroundColor3 =
@@ -1945,30 +2037,13 @@ CreateDropdown(
 	"First / third person",
 	{
 		"First Person",
-		"Third Person"
+		"Third Person",
 	},
 	Config.CameraMode,
 	function(value)
 
 		Config.CameraMode =
 			value
-
-	end
-)
-
-CreateTextBox(
-	AimPage,
-	"Fixed Aim Offset",
-	"Positive = below target",
-	Config.AimOffset,
-	function(value)
-
-		Config.AimOffset =
-			math.clamp(
-				value,
-				-100,
-				100
-			)
 
 	end
 )
@@ -2022,6 +2097,56 @@ CreateTextBox(
 
 CreateSection(
 	AimPage,
+	"HEIGHT CORRECTION"
+)
+
+CreateToggle(
+	AimPage,
+	"Local Above Target",
+	"Move aim down when you are higher",
+	Config.AboveTargetCorrection,
+	function(value)
+
+		Config.AboveTargetCorrection =
+			value
+
+	end
+)
+
+CreateTextBox(
+	AimPage,
+	"Correction Strength",
+	"0.35 = 35% of Y difference",
+	Config.AboveTargetStrength,
+	function(value)
+
+		Config.AboveTargetStrength =
+			math.max(
+				0,
+				value
+			)
+
+	end
+)
+
+CreateTextBox(
+	AimPage,
+	"Max Correction",
+	"Maximum downward correction",
+	Config.AboveTargetMaxCorrection,
+	function(value)
+
+		Config.AboveTargetMaxCorrection =
+			math.max(
+				0,
+				value
+			)
+
+	end
+)
+
+CreateSection(
+	AimPage,
 	"TARGETING"
 )
 
@@ -2061,8 +2186,13 @@ CreateToggle(
 )
 
 --============================================================
--- CONTROLLER INFO
+-- CONTROLLER
 --============================================================
+
+CreateSection(
+	AimPage,
+	"CONTROLLER"
+)
 
 local ControllerInfo
 
@@ -2081,16 +2211,11 @@ LockButtonRow =
 			if ControllerInfo then
 
 				ControllerInfo.Text =
-					"WAITING FOR CONTROLLER INPUT..."
+					"WAITING FOR CONTROLLER INPUT"
 
 			end
 		end
 	)
-
-CreateSection(
-	AimPage,
-	"CONTROLLER"
-)
 
 ControllerInfo = Create(
 	"TextLabel",
@@ -2103,7 +2228,7 @@ ControllerInfo = Create(
 				1,
 				-2,
 				0,
-				IsPhone and 35 or 50
+				IsPhone and 30 or 43
 			),
 
 		BackgroundColor3 =
@@ -2113,8 +2238,7 @@ ControllerInfo = Create(
 
 		Text =
 			"LOCK: " ..
-			Config.LockButton.Name ..
-			"\nController-only lock input.",
+			Config.LockButton.Name,
 
 		Font =
 			Enum.Font.Gotham,
@@ -2124,8 +2248,6 @@ ControllerInfo = Create(
 
 		TextColor3 =
 			COLORS.Gray,
-
-		TextWrapped = true,
 
 		TextXAlignment =
 			Enum.TextXAlignment.Left,
@@ -2143,10 +2265,10 @@ Round(
 )
 
 --============================================================
--- FIXED AIM INFORMATION
+-- HEIGHT INFO
 --============================================================
 
-local FixedAimInfo = Create(
+local HeightInfo = Create(
 	"TextLabel",
 	{
 
@@ -2157,7 +2279,7 @@ local FixedAimInfo = Create(
 				1,
 				-2,
 				0,
-				IsPhone and 48 or 62
+				IsPhone and 48 or 58
 			),
 
 		BackgroundColor3 =
@@ -2166,10 +2288,9 @@ local FixedAimInfo = Create(
 		BorderSizePixel = 0,
 
 		Text =
-			"FIXED AIM METHOD\n" ..
-			"No camera-height correction.\n" ..
-			"No distance-based vertical movement.\n" ..
-			"Aim offset is captured when locking.",
+			"THIRD PERSON AIM\n" ..
+			"Targets UpperTorso/Torso.\n" ..
+			"If your Y is higher, aim moves down based on the difference.",
 
 		Font =
 			Enum.Font.Gotham,
@@ -2193,7 +2314,7 @@ local FixedAimInfo = Create(
 )
 
 Round(
-	FixedAimInfo,
+	HeightInfo,
 	IsPhone and 7 or 9
 )
 
@@ -2274,7 +2395,7 @@ local ESPInfo = Create(
 				1,
 				-2,
 				0,
-				IsPhone and 50 or 68
+				IsPhone and 45 or 60
 			),
 
 		BackgroundColor3 =
@@ -2339,7 +2460,7 @@ local WhitelistInfo = Create(
 		BorderSizePixel = 0,
 
 		Text =
-			"Tap player to toggle\n" ..
+			"Tap a player to toggle\n" ..
 			"Grey = normal • Red = whitelist",
 
 		Font =
@@ -2393,8 +2514,7 @@ Create(
 	"UIListLayout",
 	{
 
-		Parent =
-			WhitelistList,
+		Parent = WhitelistList,
 
 		Padding =
 			UDim.new(
@@ -2408,7 +2528,7 @@ Create(
 )
 
 --============================================================
--- WHITELIST REFRESH
+-- WHITELIST UI
 --============================================================
 
 local function RefreshWhitelistUI()
@@ -2417,8 +2537,12 @@ local function RefreshWhitelistUI()
 		WhitelistList:GetChildren()
 	) do
 
-		if child:IsA("TextButton") then
+		if child:IsA(
+			"TextButton"
+		) then
+
 			child:Destroy()
+
 		end
 	end
 
@@ -2448,7 +2572,7 @@ local function RefreshWhitelistUI()
 							1,
 							0,
 							0,
-							IsPhone and 32 or 40
+							IsPhone and 31 or 40
 						),
 
 					BackgroundColor3 =
@@ -2546,7 +2670,9 @@ RefreshWhitelistUI()
 local PagesByName = {
 
 	AIM = AimPage,
+
 	ESP = ESPPage,
+
 	WHITELIST = WhitelistPage,
 }
 
@@ -2591,7 +2717,9 @@ for name, data in pairs(
 
 	data.Button.Activated:Connect(
 		function()
+
 			SetTab(name)
+
 		end
 	)
 end
@@ -2681,7 +2809,7 @@ UserInputService.InputChanged:Connect(
 )
 
 --============================================================
--- FLOATING BUTTON
+-- FLOATING REOPEN BUTTON
 --============================================================
 
 local Floating = Create(
@@ -2691,8 +2819,7 @@ local Floating = Create(
 		Name =
 			"XenonFloating",
 
-		Parent =
-			Gui,
+		Parent = Gui,
 
 		Size =
 			UDim2.fromOffset(
@@ -2737,25 +2864,14 @@ Round(
 	IsPhone and 9 or 12
 )
 
---============================================================
--- UI VISIBILITY
---============================================================
-
-local function SetUIVisible(value)
-
-	UIVisible = value
-
-	Main.Visible =
-		value
-
-	Floating.Visible =
-		not value
-end
-
 Close.Activated:Connect(
 	function()
 
-		SetUIVisible(false)
+		UIVisible = false
+
+		Main.Visible = false
+
+		Floating.Visible = true
 
 	end
 )
@@ -2763,13 +2879,17 @@ Close.Activated:Connect(
 Floating.Activated:Connect(
 	function()
 
-		SetUIVisible(true)
+		UIVisible = true
+
+		Main.Visible = true
+
+		Floating.Visible = false
 
 	end
 )
 
 --============================================================
--- CONTROLLER BUTTONS
+-- SUPPORTED CONTROLLER BUTTONS
 --============================================================
 
 local SupportedButtons = {
@@ -2801,10 +2921,12 @@ local SupportedButtons = {
 }
 
 --============================================================
--- REBIND CONTROLLER
+-- REBIND
 --============================================================
 
-local function SetLockButton(key)
+local function SetLockButton(
+	key
+)
 
 	Config.LockButton =
 		key
@@ -2813,16 +2935,11 @@ local function SetLockButton(key)
 
 	ControllerInfo.Text =
 		"LOCK: " ..
-		Config.LockButton.Name ..
-		"\nController-only lock input."
+		Config.LockButton.Name
 end
 
 UserInputService.InputBegan:Connect(
 	function(input)
-
-		--====================================================
-		-- CONTROLLER ONLY
-		--====================================================
 
 		if
 			input.UserInputType ~=
@@ -2889,7 +3006,8 @@ UserInputService.InputChanged:Connect(
 			return
 		end
 
-		if input.Position.Magnitude >
+		if
+			input.Position.Magnitude >
 			0.65
 		then
 
@@ -2905,20 +3023,22 @@ UserInputService.InputChanged:Connect(
 -- ESP
 --============================================================
 
-local function GetTeamColor(player)
+local function GetTeamColor(
+	player
+)
 
 	if player.Team then
+
 		return player.Team.TeamColor.Color
+
 	end
 
 	return COLORS.White
 end
 
---============================================================
--- REMOVE ESP
---============================================================
-
-local function RemoveESP(player)
+local function RemoveESP(
+	player
+)
 
 	local data =
 		ESPObjects[player]
@@ -2943,10 +3063,6 @@ local function RemoveESP(player)
 		nil
 end
 
---============================================================
--- ESP COLORS
---============================================================
-
 local function ApplyESPColor(
 	data,
 	player
@@ -2957,7 +3073,9 @@ local function ApplyESPColor(
 	end
 
 	local color =
-		GetTeamColor(player)
+		GetTeamColor(
+			player
+		)
 
 	if data.NameLabel then
 
@@ -2985,7 +3103,9 @@ end
 -- CREATE ESP
 --============================================================
 
-local function CreateESP(player)
+local function CreateESP(
+	player
+)
 
 	if player == LocalPlayer then
 		return
@@ -3042,11 +3162,9 @@ local function CreateESP(player)
 					Name =
 						"XenonName",
 
-					Parent =
-						head,
+					Parent = head,
 
-					Adornee =
-						head,
+					Adornee = head,
 
 					Size =
 						UDim2.fromOffset(
@@ -3061,11 +3179,9 @@ local function CreateESP(player)
 							0
 						),
 
-					AlwaysOnTop =
-						true,
+					AlwaysOnTop = true,
 
-					ResetOnSpawn =
-						false,
+					ResetOnSpawn = false,
 				}
 			)
 
@@ -3074,8 +3190,7 @@ local function CreateESP(player)
 				"TextLabel",
 				{
 
-					Parent =
-						billboard,
+					Parent = billboard,
 
 					Size =
 						UDim2.fromScale(
@@ -3083,8 +3198,7 @@ local function CreateESP(player)
 							1
 						),
 
-					BackgroundTransparency =
-						1,
+					BackgroundTransparency = 1,
 
 					Text =
 						player.Name,
@@ -3126,11 +3240,9 @@ local function CreateESP(player)
 				Name =
 					"XenonDistance",
 
-				Parent =
-					root,
+				Parent = root,
 
-				Adornee =
-					root,
+				Adornee = root,
 
 				Size =
 					UDim2.fromOffset(
@@ -3145,11 +3257,9 @@ local function CreateESP(player)
 						0
 					),
 
-				AlwaysOnTop =
-					true,
+				AlwaysOnTop = true,
 
-				ResetOnSpawn =
-					false,
+				ResetOnSpawn = false,
 			}
 		)
 
@@ -3167,11 +3277,9 @@ local function CreateESP(player)
 						1
 					),
 
-				BackgroundTransparency =
-					1,
+				BackgroundTransparency = 1,
 
-				Text =
-					"0 studs",
+				Text = "0 studs",
 
 				Font =
 					Enum.Font.Gotham,
@@ -3198,7 +3306,7 @@ local function CreateESP(player)
 		distanceLabel
 
 	--========================================================
-	-- OUTLINE
+	-- HIGHLIGHT
 	--========================================================
 
 	if Config.ESPShowOutline then
@@ -3220,11 +3328,9 @@ local function CreateESP(player)
 					DepthMode =
 						Enum.HighlightDepthMode.AlwaysOnTop,
 
-					FillTransparency =
-						1,
+					FillTransparency = 1,
 
-					OutlineTransparency =
-						0,
+					OutlineTransparency = 0,
 
 					OutlineColor =
 						GetTeamColor(
@@ -3250,7 +3356,9 @@ end
 -- REFRESH ESP
 --============================================================
 
-local function RefreshESP(player)
+local function RefreshESP(
+	player
+)
 
 	if player == LocalPlayer then
 		return
@@ -3294,7 +3402,9 @@ end
 -- PLAYER CONNECTIONS
 --============================================================
 
-local function ConnectPlayer(player)
+local function ConnectPlayer(
+	player
+)
 
 	if player == LocalPlayer then
 		return
@@ -3310,15 +3420,23 @@ local function ConnectPlayer(player)
 		player.CharacterAdded:Connect(
 			function()
 
-				task.wait(0.15)
+				task.wait(
+					0.15
+				)
 
-				RemoveESP(player)
+				RemoveESP(
+					player
+				)
 
 				if Config.ESPEnabled then
-					CreateESP(player)
+
+					CreateESP(
+						player
+					)
+
 				end
 
-				-- NEVER RETARGET
+				-- Never retarget.
 				if LockedTarget ==
 					player
 				then
@@ -3365,11 +3483,17 @@ end
 Players.PlayerAdded:Connect(
 	function(player)
 
-		ConnectPlayer(player)
+		ConnectPlayer(
+			player
+		)
 
-		task.wait(0.2)
+		task.wait(
+			0.2
+		)
 
-		RefreshESP(player)
+		RefreshESP(
+			player
+		)
 
 		RefreshWhitelistUI()
 	end
@@ -3436,8 +3560,8 @@ RunService.Heartbeat:Connect(
 
 		ESPCounter += 1
 
-		if ESPcounter and false then
-			return
+		if ESPcounter then
+			-- intentionally unused
 		end
 
 		if ESPCounter % 4 ~= 0 then
@@ -3457,14 +3581,18 @@ RunService.Heartbeat:Connect(
 
 			if not player.Parent then
 
-				RemoveESP(player)
+				RemoveESP(
+					player
+				)
 
 				continue
 			end
 
 			if not IsAlive(player) then
 
-				RemoveESP(player)
+				RemoveESP(
+					player
+				)
 
 				continue
 			end
@@ -3474,14 +3602,17 @@ RunService.Heartbeat:Connect(
 				and IsWhitelisted(player)
 			then
 
-				RemoveESP(player)
+				RemoveESP(
+					player
+				)
 
 				continue
 			end
 
 			local root =
 				player.Character
-				and player.Character:FindFirstChild(
+				and
+				player.Character:FindFirstChild(
 					"HumanoidRootPart"
 				)
 
@@ -3534,7 +3665,9 @@ task.spawn(
 
 		while Gui.Parent do
 
-			task.wait(0.2)
+			task.wait(
+				0.2
+			)
 
 			if
 				lastEnabled ~=
@@ -3592,7 +3725,7 @@ RunService:BindToRenderStep(
 		end
 
 		--====================================================
-		-- TARGET MUST STAY THE SAME
+		-- NEVER RETARGET
 		--====================================================
 
 		if not LockedTarget then
@@ -3602,10 +3735,6 @@ RunService:BindToRenderStep(
 			return
 		end
 
-		--====================================================
-		-- NO RETARGETING
-		--====================================================
-
 		if not IsValidTarget(
 			LockedTarget
 		) then
@@ -3614,10 +3743,6 @@ RunService:BindToRenderStep(
 
 			return
 		end
-
-		--====================================================
-		-- GET AIM POINT
-		--====================================================
 
 		local aimPosition =
 			GetAimPosition(
@@ -3720,7 +3845,9 @@ _G.XenonCleanup = function()
 		ESPObjects
 	) do
 
-		RemoveESP(player)
+		RemoveESP(
+			player
+		)
 
 	end
 
@@ -3747,27 +3874,21 @@ end
 -- START
 --============================================================
 
-SetUIVisible(true)
+SetTab("AIM")
 
 print(
 	"Xenon loaded"
 )
 
 print(
-	"Fixed aim-point system enabled"
+	"Third person target: UpperTorso/Torso"
 )
 
 print(
-	"Lock button:",
+	"Local-Y downward correction enabled"
+)
+
+print(
+	"Controller lock:",
 	Config.LockButton.Name
-)
-
-print(
-	"Mobile:",
-	IsPhone
-)
-
-print(
-	"Controller:",
-	UserInputService.GamepadEnabled
 )
