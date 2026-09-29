@@ -51,6 +51,16 @@ local Config = {
 
     ReferenceDistance = 100,
 
+    -- 3P screen-space correction keeps the controller aim point
+    -- anchored around the upper torso/head instead of drifting
+    -- above or below as camera distance changes.
+    ThirdPersonCorrection = true,
+    ThirdPersonAnchor = 0.65,
+    ThirdPersonCorrectionStrength = 0.055,
+    ThirdPersonMinDistanceScale = 0.75,
+    ThirdPersonMaxDistanceScale = 2.5,
+    ThirdPersonMaxCorrection = 35,
+
     Smoothing = 0,
 
     Prediction = 0.08,
@@ -1746,12 +1756,41 @@ local function GetAdaptiveOffset(TargetRoot)
         return Config.AimOffset
     end
 
+    local Character = TargetRoot.Parent
+
+    if not Character then
+        return Config.AimOffset
+    end
+
+    local Head = Character:FindFirstChild("Head")
+
+    -- Use an upper-body anchor rather than the root itself.
+    -- 0 = root/hips, 1 = head. 0.65 keeps the point around
+    -- the upper torso/neck area.
+    local AnchorPosition
+
+    if Head then
+        AnchorPosition =
+            TargetRoot.Position:Lerp(
+                Head.Position,
+                math.clamp(
+                    Config.ThirdPersonAnchor,
+                    0,
+                    1
+                )
+            )
+    else
+        AnchorPosition = TargetRoot.Position
+    end
+
     local Distance =
         (
-            TargetRoot.Position -
+            AnchorPosition -
             CurrentCamera.CFrame.Position
         ).Magnitude
 
+    -- Keep the original 23.5-style distance behavior as the
+    -- baseline, but do not let the correction become extreme.
     local Adaptive =
         Config.AimOffset *
         (
@@ -1759,8 +1798,61 @@ local function GetAdaptiveOffset(TargetRoot)
             Config.ReferenceDistance
         )
 
+    if not Config.ThirdPersonCorrection then
+        return math.clamp(
+            Adaptive,
+            -100,
+            100
+        )
+    end
+
+    -- Measure where the actual upper-body anchor currently sits
+    -- on the controller/camera center of the screen. This is what
+    -- prevents close targets from going over the target and far
+    -- targets from dropping underneath it.
+    local Viewport = CurrentCamera.ViewportSize
+
+    if Viewport.X <= 0 or Viewport.Y <= 0 then
+        return math.clamp(Adaptive, -100, 100)
+    end
+
+    local ScreenPosition, OnScreen =
+        CurrentCamera:WorldToViewportPoint(
+            AnchorPosition
+        )
+
+    if not OnScreen or ScreenPosition.Z <= 0 then
+        return math.clamp(Adaptive, -100, 100)
+    end
+
+    local ScreenCenterY =
+        Viewport.Y * 0.5
+
+    local VerticalError =
+        ScreenPosition.Y -
+        ScreenCenterY
+
+    local DistanceScale =
+        math.clamp(
+            Distance / 40,
+            Config.ThirdPersonMinDistanceScale,
+            Config.ThirdPersonMaxDistanceScale
+        )
+
+    local Correction =
+        VerticalError *
+        Config.ThirdPersonCorrectionStrength *
+        DistanceScale
+
+    Correction =
+        math.clamp(
+            Correction,
+            -Config.ThirdPersonMaxCorrection,
+            Config.ThirdPersonMaxCorrection
+        )
+
     return math.clamp(
-        Adaptive,
+        Adaptive + Correction,
         -100,
         100
     )
@@ -1804,10 +1896,44 @@ local function GetAimPosition(Player)
         )
     end
 
+    -- In third person, predict from the same upper-body anchor
+    -- used by the adaptive correction. Keeping both calculations
+    -- on the same point prevents the dot from separating from the
+    -- target when distance or movement changes.
+    local Head =
+        Character:FindFirstChild("Head")
+
+    local AnchorPosition
+    local AnchorVelocity
+
+    if Head then
+        local AnchorAlpha =
+            math.clamp(
+                Config.ThirdPersonAnchor,
+                0,
+                1
+            )
+
+        AnchorPosition =
+            Root.Position:Lerp(
+                Head.Position,
+                AnchorAlpha
+            )
+
+        AnchorVelocity =
+            Root.AssemblyLinearVelocity:Lerp(
+                Head.AssemblyLinearVelocity,
+                AnchorAlpha
+            )
+    else
+        AnchorPosition = Root.Position
+        AnchorVelocity = Root.AssemblyLinearVelocity
+    end
+
     local Predicted =
         GetPredictedPosition(
-            Root.Position,
-            Root.AssemblyLinearVelocity
+            AnchorPosition,
+            AnchorVelocity
         )
 
     local Offset =
