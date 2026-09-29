@@ -48,6 +48,9 @@ local Config = {
 	-- Camera
 	CameraMode = "Third Person",
 
+	-- Fixed third-person body aim offset.
+	AimOffset = 23.5,
+
 	-- Prediction
 	-- X = normal
 	-- Y = inverted
@@ -578,10 +581,20 @@ local function GetThirdPersonAimPosition(
 			aimPart.AssemblyLinearVelocity
 		)
 
-	-- Apply ONLY local-player-height correction.
+	-- Fixed 23.5-stud downward third-person offset.
+	-- No distance-based scaling and no camera-height correction.
+	local aimPosition =
+		predicted -
+		Vector3.new(
+			0,
+			Config.AimOffset,
+			0
+		)
+
+	-- Apply local-player-above-target correction AFTER the fixed offset.
 	local corrected =
 		ApplyHeightCorrection(
-			predicted,
+			aimPosition,
 			predicted
 		)
 
@@ -3560,9 +3573,6 @@ RunService.Heartbeat:Connect(
 
 		ESPCounter += 1
 
-		if ESPcounter then
-			-- intentionally unused
-		end
 
 		if ESPCounter % 4 ~= 0 then
 			return
