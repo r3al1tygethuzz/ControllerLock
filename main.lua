@@ -24,14 +24,13 @@ pcall(function()
 	end
 end)
 
-local CleanupConnections = {}
+local Connections = {}
+local Destroyed = false
 
-local function TrackConnection(connection)
-	table.insert(CleanupConnections, connection)
+local function Track(connection)
+	table.insert(Connections, connection)
 	return connection
 end
-
-local Destroyed = false
 
 _G.XenonCleanup = function()
 	if Destroyed then
@@ -40,7 +39,7 @@ _G.XenonCleanup = function()
 
 	Destroyed = true
 
-	for _, connection in ipairs(CleanupConnections) do
+	for _, connection in ipairs(Connections) do
 		pcall(function()
 			connection:Disconnect()
 		end)
@@ -50,15 +49,15 @@ _G.XenonCleanup = function()
 		RunService:UnbindFromRenderStep("XenonCameraLock")
 	end)
 
-	local oldGui = PlayerGui:FindFirstChild("Xenon")
+	local gui = PlayerGui:FindFirstChild("Xenon")
 
-	if oldGui then
-		oldGui:Destroy()
+	if gui then
+		gui:Destroy()
 	end
 end
 
 --==============================================================
--- REMOVE OLD GUI IF PRESENT
+-- REMOVE EXISTING XENON
 --==============================================================
 
 local ExistingGui = PlayerGui:FindFirstChild("Xenon")
@@ -76,23 +75,39 @@ end)
 --==============================================================
 
 local Config = {
+
+	-- Default controller lock button
 	LockButton = Enum.KeyCode.ButtonY,
 
+	-- First Person / Third Person
 	CameraMode = "Third Person",
 
-	-- Third-person screen-space offset.
+	-- Base adaptive third-person offset.
 	--
-	-- Positive = below target.
-	-- Negative = above target.
+	-- Positive = below
+	-- Negative = above
 	AimOffset = 10,
 
-	-- 0 = instant.
-	Smoothing = 0.30,
+	-- Distance where AimOffset is considered normal.
+	ReferenceDistance = 100,
 
-	-- 0 = no prediction.
+	-- Camera smoothing
+	--
+	-- 0 = HARD LOCK
+	Smoothing = 0,
+
+	-- Prediction
 	Prediction = 0.08,
 
+	-- Maximum target distance
 	MaxTargetDistance = 500,
+
+	-- TRUE:
+	-- Stay on the same target after locking.
+	--
+	-- FALSE:
+	-- Each new lock chooses target by physical distance.
+	StickyAim = true,
 }
 
 --==============================================================
@@ -127,12 +142,14 @@ local SmoothingBox
 local PredictionBox
 
 local LockButtonDisplay
+local StickyButton
 
 --==============================================================
 -- GAMEPAD DETECTION
 --==============================================================
 
 local function IsGamepad(input)
+
 	return input.UserInputType == Enum.UserInputType.Gamepad1
 		or input.UserInputType == Enum.UserInputType.Gamepad2
 		or input.UserInputType == Enum.UserInputType.Gamepad3
@@ -141,50 +158,44 @@ local function IsGamepad(input)
 		or input.UserInputType == Enum.UserInputType.Gamepad6
 		or input.UserInputType == Enum.UserInputType.Gamepad7
 		or input.UserInputType == Enum.UserInputType.Gamepad8
+
 end
 
 --==============================================================
--- SUPPORTED CONTROLLER INPUT NAMES
+-- VALID CONTROLLER BUTTONS
 --==============================================================
 
--- These are STRING names intentionally.
---
--- This prevents the old:
---
--- Enum.KeyCode.ButtonDPadUp
---
--- crash.
---
--- Roblox's valid D-pad names for this version are:
---
--- DPadUp
--- DPadDown
--- DPadLeft
--- DPadRight
-
 local SupportedButtons = {
+
+	-- Face buttons
 	ButtonA = true,
 	ButtonB = true,
 	ButtonX = true,
 	ButtonY = true,
 
+	-- D-Pad
 	DPadUp = true,
 	DPadDown = true,
 	DPadLeft = true,
 	DPadRight = true,
 
+	-- Bumpers
 	ButtonL1 = true,
 	ButtonR1 = true,
 
+	-- Triggers
 	ButtonL2 = true,
 	ButtonR2 = true,
 
+	-- Stick clicks
 	ButtonL3 = true,
 	ButtonR3 = true,
 
+	-- Menu
 	ButtonSelect = true,
 	ButtonStart = true,
 
+	-- Stick movement
 	Thumbstick1 = true,
 	Thumbstick2 = true,
 }
@@ -202,10 +213,11 @@ local function GetButtonName(keyCode)
 	local name = keyCode.Name
 
 	local names = {
-		ButtonA = "A",
-		ButtonB = "B",
-		ButtonX = "X",
-		ButtonY = "Y",
+
+		ButtonA = "A / CROSS",
+		ButtonB = "B / CIRCLE",
+		ButtonX = "X / SQUARE",
+		ButtonY = "Y / TRIANGLE",
 
 		DPadUp = "D-PAD UP",
 		DPadDown = "D-PAD DOWN",
@@ -235,12 +247,7 @@ end
 -- NUMBER PARSER
 --==============================================================
 
-local function ReadNumber(
-	text,
-	defaultValue,
-	minimum,
-	maximum
-)
+local function ReadNumber(text, defaultValue, minimum, maximum)
 
 	local value = tonumber(text)
 
@@ -248,15 +255,12 @@ local function ReadNumber(
 		return defaultValue
 	end
 
-	return math.clamp(
-		value,
-		minimum,
-		maximum
-	)
+	return math.clamp(value, minimum, maximum)
+
 end
 
 --==============================================================
--- TARGET CHARACTER
+-- GET TARGET PARTS
 --==============================================================
 
 local function GetTargetParts(player)
@@ -290,6 +294,7 @@ local function GetTargetParts(player)
 	end
 
 	return character, humanoid, root
+
 end
 
 --==============================================================
@@ -324,20 +329,19 @@ local function IsValidTarget(player)
 	local distance =
 		(root.Position - localRoot.Position).Magnitude
 
-	if distance >
-		Config.MaxTargetDistance then
-
+	if distance > Config.MaxTargetDistance then
 		return false
 	end
 
 	return true
+
 end
 
 --==============================================================
--- FIND CLOSEST TARGET
+-- FIND CLOSEST TO SCREEN CENTER
 --==============================================================
 
-local function FindClosestTarget()
+local function FindClosestToCursor()
 
 	local Camera =
 		workspace.CurrentCamera
@@ -345,9 +349,6 @@ local function FindClosestTarget()
 	if not Camera then
 		return nil
 	end
-
-	local closestTarget = nil
-	local closestDistance = math.huge
 
 	local viewport =
 		Camera.ViewportSize
@@ -358,9 +359,10 @@ local function FindClosestTarget()
 			viewport.Y / 2
 		)
 
-	for _, player in ipairs(
-		Players:GetPlayers()
-	) do
+	local closestTarget = nil
+	local closestScreenDistance = math.huge
+
+	for _, player in ipairs(Players:GetPlayers()) do
 
 		if player ~= LocalPlayer then
 
@@ -369,28 +371,38 @@ local function FindClosestTarget()
 
 			if character and humanoid and root then
 
-				local screenPosition, onScreen =
-					Camera:WorldToViewportPoint(
-						root.Position
-					)
+				local distance =
+					(root.Position -
+						Camera.CFrame.Position).Magnitude
 
-				if onScreen
-					and screenPosition.Z > 0 then
+				if distance <= Config.MaxTargetDistance then
 
-					local screenPoint =
-						Vector2.new(
-							screenPosition.X,
-							screenPosition.Y
+					local screenPosition, onScreen =
+						Camera:WorldToViewportPoint(
+							root.Position
 						)
 
-					local distance =
-						(screenPoint - center).Magnitude
+					if onScreen
+						and screenPosition.Z > 0 then
 
-					if distance <
-						closestDistance then
+						local point =
+							Vector2.new(
+								screenPosition.X,
+								screenPosition.Y
+							)
 
-						closestDistance = distance
-						closestTarget = player
+						local screenDistance =
+							(point - center).Magnitude
+
+						if screenDistance <
+							closestScreenDistance then
+
+							closestScreenDistance =
+								screenDistance
+
+							closestTarget =
+								player
+						end
 					end
 				end
 			end
@@ -398,45 +410,124 @@ local function FindClosestTarget()
 	end
 
 	return closestTarget
+
 end
 
 --==============================================================
--- STATUS
+-- FIND CLOSEST BY PHYSICAL DISTANCE
+--==============================================================
+
+local function FindClosestByDistance()
+
+	local localCharacter =
+		LocalPlayer.Character
+
+	if not localCharacter then
+		return nil
+	end
+
+	local localRoot =
+		localCharacter:FindFirstChild(
+			"HumanoidRootPart"
+		)
+
+	if not localRoot then
+		return nil
+	end
+
+	local closestTarget = nil
+	local closestDistance = math.huge
+
+	for _, player in ipairs(Players:GetPlayers()) do
+
+		if player ~= LocalPlayer then
+
+			local character, humanoid, root =
+				GetTargetParts(player)
+
+			if character and humanoid and root then
+
+				local distance =
+					(root.Position -
+						localRoot.Position).Magnitude
+
+				if distance <= Config.MaxTargetDistance then
+
+					if distance < closestDistance then
+
+						closestDistance =
+							distance
+
+						closestTarget =
+							player
+					end
+				end
+			end
+		end
+	end
+
+	return closestTarget
+
+end
+
+--==============================================================
+-- FIND TARGET
+--==============================================================
+
+local function FindTarget()
+
+	-- Sticky ON:
+	-- New lock chooses closest to cursor.
+
+	-- Sticky OFF:
+	-- New lock chooses physically closest.
+
+	if Config.StickyAim then
+		return FindClosestToCursor()
+	else
+		return FindClosestByDistance()
+	end
+
+end
+
+--==============================================================
+-- UPDATE STATUS
 --==============================================================
 
 local function UpdateStatus()
 
-	if not StatusText then
-		return
-	end
+	if StatusText then
 
-	if IsLocked and LockedTarget then
+		if IsLocked and LockedTarget then
 
-		StatusText.Text = "LOCKED"
+			StatusText.Text =
+				"LOCKED"
 
-		StatusText.TextColor3 =
-			Color3.fromRGB(
-				240,
-				55,
-				65
-			)
+			StatusText.TextColor3 =
+				Color3.fromRGB(
+					240,
+					55,
+					65
+				)
 
-	else
+		else
 
-		StatusText.Text = "READY"
+			StatusText.Text =
+				"READY"
 
-		StatusText.TextColor3 =
-			Color3.fromRGB(
-				210,
-				210,
-				210
-			)
+			StatusText.TextColor3 =
+				Color3.fromRGB(
+					210,
+					210,
+					210
+				)
+
+		end
 	end
 
 	if TargetText then
 
-		if IsLocked
-			and LockedTarget then
+		if IsLocked and LockedTarget then
 
 			TargetText.Text =
 				"TARGET / " ..
@@ -446,12 +537,14 @@ local function UpdateStatus()
 
 			TargetText.Text =
 				"TARGET / NONE"
+
 		end
 	end
+
 end
 
 --==============================================================
--- LOCK BUTTON DISPLAY
+-- UPDATE BUTTON DISPLAY
 --==============================================================
 
 local function UpdateLockButtonDisplay()
@@ -460,12 +553,58 @@ local function UpdateLockButtonDisplay()
 		return
 	end
 
-	LockButtonDisplay.Text =
-		"SET LOCK BUTTON     [" ..
-		GetButtonName(
-			Config.LockButton
-		) ..
-		"]"
+	if WaitingForButton then
+
+		LockButtonDisplay.Text =
+			"PRESS CONTROLLER BUTTON..."
+
+	else
+
+		LockButtonDisplay.Text =
+			"SET LOCK BUTTON     [" ..
+			GetButtonName(Config.LockButton) ..
+			"]"
+
+	end
+
+end
+
+--==============================================================
+-- UPDATE STICKY BUTTON
+--==============================================================
+
+local function UpdateStickyButton()
+
+	if not StickyButton then
+		return
+	end
+
+	if Config.StickyAim then
+
+		StickyButton.Text =
+			"STICKY AIM     [ON]"
+
+		StickyButton.TextColor3 =
+			Color3.fromRGB(
+				240,
+				240,
+				240
+			)
+
+	else
+
+		StickyButton.Text =
+			"STICKY AIM     [OFF]"
+
+		StickyButton.TextColor3 =
+			Color3.fromRGB(
+				180,
+				180,
+				185
+			)
+
+	end
+
 end
 
 --==============================================================
@@ -478,6 +617,7 @@ local function Unlock()
 	LockedTarget = nil
 
 	UpdateStatus()
+
 end
 
 --==============================================================
@@ -491,23 +631,23 @@ local function Lock()
 	end
 
 	local target =
-		FindClosestTarget()
+		FindTarget()
 
 	if not target then
-
-		UpdateStatus()
-
 		return
 	end
 
-	LockedTarget = target
+	LockedTarget =
+		target
+
 	IsLocked = true
 
 	UpdateStatus()
+
 end
 
 --==============================================================
--- TOGGLE
+-- TOGGLE LOCK
 --==============================================================
 
 local function ToggleLock()
@@ -517,15 +657,18 @@ local function ToggleLock()
 	else
 		Lock()
 	end
+
 end
 
 --==============================================================
--- CREATE SCREEN GUI
+-- CREATE GUI
 --==============================================================
 
-ScreenGui = Instance.new("ScreenGui")
+ScreenGui =
+	Instance.new("ScreenGui")
 
-ScreenGui.Name = "Xenon"
+ScreenGui.Name =
+	"Xenon"
 
 ScreenGui.ResetOnSpawn = false
 
@@ -534,15 +677,18 @@ ScreenGui.IgnoreGuiInset = true
 ScreenGui.ZIndexBehavior =
 	Enum.ZIndexBehavior.Sibling
 
-ScreenGui.Parent = PlayerGui
+ScreenGui.Parent =
+	PlayerGui
 
 --==============================================================
 -- MAIN FRAME
 --==============================================================
 
-MainFrame = Instance.new("Frame")
+MainFrame =
+	Instance.new("Frame")
 
-MainFrame.Name = "Main"
+MainFrame.Name =
+	"Main"
 
 MainFrame.AnchorPoint =
 	Vector2.new(
@@ -559,7 +705,7 @@ MainFrame.Position =
 MainFrame.Size =
 	UDim2.fromOffset(
 		390,
-		540
+		570
 	)
 
 MainFrame.BackgroundColor3 =
@@ -571,7 +717,8 @@ MainFrame.BackgroundColor3 =
 
 MainFrame.BorderSizePixel = 0
 
-MainFrame.Parent = ScreenGui
+MainFrame.Parent =
+	ScreenGui
 
 local MainCorner =
 	Instance.new("UICorner")
@@ -608,22 +755,22 @@ MainStroke.Parent =
 
 local function UpdateSize()
 
-	local camera =
+	local Camera =
 		workspace.CurrentCamera
 
-	if not camera then
+	if not Camera then
 		return
 	end
 
 	local viewport =
-		camera.ViewportSize
+		Camera.ViewportSize
 
 	if viewport.X <= 600 then
 
 		MainFrame.Size =
 			UDim2.fromOffset(
 				300,
-				500
+				525
 			)
 
 	elseif viewport.X <= 1000 then
@@ -631,7 +778,7 @@ local function UpdateSize()
 		MainFrame.Size =
 			UDim2.fromOffset(
 				350,
-				525
+				550
 			)
 
 	else
@@ -639,20 +786,14 @@ local function UpdateSize()
 		MainFrame.Size =
 			UDim2.fromOffset(
 				390,
-				540
+				570
 			)
+
 	end
+
 end
 
 UpdateSize()
-
-TrackConnection(
-	workspace.CurrentCamera
-		:GetPropertyChangedSignal(
-			"ViewportSize"
-		)
-		:Connect(UpdateSize)
-)
 
 --==============================================================
 -- TOP BAR
@@ -660,9 +801,6 @@ TrackConnection(
 
 local TopBar =
 	Instance.new("Frame")
-
-TopBar.Name =
-	"TopBar"
 
 TopBar.Size =
 	UDim2.new(
@@ -678,7 +816,7 @@ TopBar.Parent =
 	MainFrame
 
 --==============================================================
--- TOP RED LINE
+-- RED LINE
 --==============================================================
 
 local RedLine =
@@ -723,7 +861,7 @@ RedCorner.Parent =
 	RedLine
 
 --==============================================================
--- X LOGO
+-- LOGO
 --==============================================================
 
 local Logo =
@@ -746,7 +884,8 @@ Logo.Size =
 Logo.Font =
 	Enum.Font.GothamBlack
 
-Logo.Text = "X"
+Logo.Text =
+	"X"
 
 Logo.TextSize = 30
 
@@ -786,7 +925,8 @@ Title.Size =
 Title.Font =
 	Enum.Font.GothamBold
 
-Title.Text = "XENON"
+Title.Text =
+	"XENON"
 
 Title.TextSize = 21
 
@@ -854,9 +994,6 @@ Subtitle.Parent =
 local CloseButton =
 	Instance.new("TextButton")
 
-CloseButton.Name =
-	"Close"
-
 CloseButton.AnchorPoint =
 	Vector2.new(
 		1,
@@ -886,7 +1023,8 @@ CloseButton.BackgroundColor3 =
 
 CloseButton.BorderSizePixel = 0
 
-CloseButton.Text = "×"
+CloseButton.Text =
+	"×"
 
 CloseButton.TextSize = 27
 
@@ -916,7 +1054,7 @@ CloseCorner.Parent =
 	CloseButton
 
 --==============================================================
--- CONTENT
+-- SCROLLING CONTENT
 --==============================================================
 
 local Scroll =
@@ -957,7 +1095,7 @@ Scroll.CanvasSize =
 		0,
 		0,
 		0,
-		760
+		900
 	)
 
 Scroll.Parent =
@@ -982,13 +1120,10 @@ Layout.Parent =
 	Scroll
 
 --==============================================================
--- SECTION CREATOR
+-- SECTION
 --==============================================================
 
-local function CreateSection(
-	text,
-	order
-)
+local function CreateSection(text, order)
 
 	local label =
 		Instance.new("TextLabel")
@@ -1006,7 +1141,8 @@ local function CreateSection(
 	label.Font =
 		Enum.Font.GothamBold
 
-	label.Text = text
+	label.Text =
+		text
 
 	label.TextSize = 10
 
@@ -1027,10 +1163,11 @@ local function CreateSection(
 		Scroll
 
 	return label
+
 end
 
 --==============================================================
--- STATUS CARD
+-- STATUS
 --==============================================================
 
 local StatusCard =
@@ -1430,14 +1567,10 @@ TPcorner.Parent =
 	ThirdPersonButton
 
 --==============================================================
--- INPUT FIELD
+-- INPUT CREATOR
 --==============================================================
 
-local function CreateInput(
-	labelText,
-	defaultText,
-	order
-)
+local function CreateInput(labelText, defaultText, order)
 
 	local container =
 		Instance.new("Frame")
@@ -1576,6 +1709,7 @@ local function CreateInput(
 		box
 
 	return box
+
 end
 
 --==============================================================
@@ -1589,28 +1723,30 @@ CreateSection(
 
 OffsetBox =
 	CreateInput(
-		"THIRD PERSON SCREEN OFFSET",
-		tostring(Config.AimOffset),
+		"ADAPTIVE THIRD PERSON OFFSET",
+		"10",
 		6
 	)
 
-TrackConnection(
-	OffsetBox.FocusLost:Connect(function()
+Track(
+	OffsetBox.FocusLost:Connect(
+		function()
 
-		Config.AimOffset =
-			ReadNumber(
-				OffsetBox.Text,
-				10,
-				-500,
-				500
-			)
+			Config.AimOffset =
+				ReadNumber(
+					OffsetBox.Text,
+					10,
+					-100,
+					100
+				)
 
-		OffsetBox.Text =
-			tostring(
-				Config.AimOffset
-			)
+			OffsetBox.Text =
+				tostring(
+					Config.AimOffset
+				)
 
-	end)
+		end
+	)
 )
 
 --==============================================================
@@ -1625,7 +1761,7 @@ Recommendation.Size =
 		1,
 		-10,
 		0,
-		44
+		46
 	)
 
 Recommendation.BackgroundColor3 =
@@ -1642,9 +1778,11 @@ Recommendation.Font =
 
 Recommendation.Text =
 	"HEAD  ≈  FIRST PERSON\n" ..
-	"TORSO  ≈  THIRD PERSON"
+	"POSITIVE OFFSET = BELOW  •  NEGATIVE = ABOVE"
 
 Recommendation.TextSize = 9
+
+Recommendation.TextWrapped = true
 
 Recommendation.TextXAlignment =
 	Enum.TextXAlignment.Left
@@ -1694,29 +1832,31 @@ RecPadding.Parent =
 
 SmoothingBox =
 	CreateInput(
-		"SMOOTHING",
-		"0.30",
+		"SMOOTHING  (0 = HARD LOCK)",
+		"0",
 		8
 	)
 
-TrackConnection(
-	SmoothingBox.FocusLost:Connect(function()
+Track(
+	SmoothingBox.FocusLost:Connect(
+		function()
 
-		Config.Smoothing =
-			ReadNumber(
-				SmoothingBox.Text,
-				0.30,
-				0,
-				10
-			)
+			Config.Smoothing =
+				ReadNumber(
+					SmoothingBox.Text,
+					0,
+					0,
+					10
+				)
 
-		SmoothingBox.Text =
-			string.format(
-				"%.2f",
-				Config.Smoothing
-			)
+			SmoothingBox.Text =
+				string.format(
+					"%.2f",
+					Config.Smoothing
+				)
 
-	end)
+		end
+	)
 )
 
 --==============================================================
@@ -1730,34 +1870,116 @@ PredictionBox =
 		9
 	)
 
-TrackConnection(
-	PredictionBox.FocusLost:Connect(function()
+Track(
+	PredictionBox.FocusLost:Connect(
+		function()
 
-		Config.Prediction =
-			ReadNumber(
-				PredictionBox.Text,
-				0.08,
-				0,
-				2
-			)
+			Config.Prediction =
+				ReadNumber(
+					PredictionBox.Text,
+					0.08,
+					0,
+					2
+				)
 
-		PredictionBox.Text =
-			string.format(
-				"%.2f",
-				Config.Prediction
-			)
+			PredictionBox.Text =
+				string.format(
+					"%.2f",
+					Config.Prediction
+				)
 
-	end)
+		end
+	)
 )
 
 --==============================================================
--- CONTROLLER
+-- TARGETING
 --==============================================================
 
 CreateSection(
-	"CONTROLLER",
+	"TARGETING",
 	10
 )
+
+--==============================================================
+-- STICKY BUTTON
+--==============================================================
+
+StickyButton =
+	Instance.new("TextButton")
+
+StickyButton.Size =
+	UDim2.new(
+		1,
+		-10,
+		0,
+		48
+	)
+
+StickyButton.BackgroundColor3 =
+	Color3.fromRGB(
+		24,
+		24,
+		27
+	)
+
+StickyButton.BorderSizePixel = 0
+
+StickyButton.Font =
+	Enum.Font.GothamBold
+
+StickyButton.TextSize = 10
+
+StickyButton.TextXAlignment =
+	Enum.TextXAlignment.Left
+
+StickyButton.LayoutOrder = 11
+
+StickyButton.Parent =
+	Scroll
+
+local StickyPadding =
+	Instance.new("UIPadding")
+
+StickyPadding.PaddingLeft =
+	UDim.new(
+		0,
+		14
+	)
+
+StickyPadding.Parent =
+	StickyButton
+
+local StickyCorner =
+	Instance.new("UICorner")
+
+StickyCorner.CornerRadius =
+	UDim.new(
+		0,
+		9
+	)
+
+StickyCorner.Parent =
+	StickyButton
+
+UpdateStickyButton()
+
+Track(
+	StickyButton.MouseButton1Click:Connect(
+		function()
+
+			Config.StickyAim =
+				not Config.StickyAim
+
+			UpdateStickyButton()
+
+		end
+	)
+)
+
+--==============================================================
+-- LOCK BUTTON
+--==============================================================
 
 LockButtonDisplay =
 	Instance.new("TextButton")
@@ -1794,7 +2016,7 @@ LockButtonDisplay.TextColor3 =
 		230
 	)
 
-LockButtonDisplay.LayoutOrder = 11
+LockButtonDisplay.LayoutOrder = 12
 
 LockButtonDisplay.Parent =
 	Scroll
@@ -1825,11 +2047,7 @@ ButtonCorner.Parent =
 
 UpdateLockButtonDisplay()
 
---==============================================================
--- SET CONTROLLER BUTTON
---==============================================================
-
-TrackConnection(
+Track(
 	LockButtonDisplay.MouseButton1Click:Connect(
 		function()
 
@@ -1839,8 +2057,7 @@ TrackConnection(
 
 			WaitingForButton = true
 
-			LockButtonDisplay.Text =
-				"PRESS CONTROLLER BUTTON..."
+			UpdateLockButtonDisplay()
 
 		end
 	)
@@ -1858,7 +2075,7 @@ Guide.Size =
 		1,
 		-10,
 		0,
-		82
+		92
 	)
 
 Guide.BackgroundColor3 =
@@ -1875,9 +2092,9 @@ Guide.Font =
 
 Guide.Text =
 	"XENON CONTROLLER GUIDE\n\n" ..
-	"Press your configured controller button to lock.\n" ..
-	"Press it again to unlock.\n" ..
-	"Xenon stays on the original target."
+	"Sticky ON  =  stays on your selected target.\n" ..
+	"Sticky OFF =  selects the physically closest target.\n" ..
+	"Lock button toggles the camera lock."
 
 Guide.TextSize = 9
 
@@ -1896,7 +2113,7 @@ Guide.TextColor3 =
 		150
 	)
 
-Guide.LayoutOrder = 12
+Guide.LayoutOrder = 13
 
 Guide.Parent =
 	Scroll
@@ -1963,7 +2180,7 @@ Footer.TextColor3 =
 		85
 	)
 
-Footer.LayoutOrder = 13
+Footer.LayoutOrder = 14
 
 Footer.Parent =
 	Scroll
@@ -1972,7 +2189,7 @@ Footer.Parent =
 -- MODE DROPDOWN
 --==============================================================
 
-TrackConnection(
+Track(
 	ModeButton.MouseButton1Click:Connect(
 		function()
 
@@ -1986,7 +2203,7 @@ TrackConnection(
 						0,
 						0,
 						0,
-						850
+						1000
 					)
 
 			else
@@ -1996,15 +2213,16 @@ TrackConnection(
 						0,
 						0,
 						0,
-						760
+						900
 					)
+
 			end
 
 		end
 	)
 )
 
-TrackConnection(
+Track(
 	FirstPersonButton.MouseButton1Click:Connect(
 		function()
 
@@ -2021,14 +2239,14 @@ TrackConnection(
 					0,
 					0,
 					0,
-					760
+					900
 				)
 
 		end
 	)
 )
 
-TrackConnection(
+Track(
 	ThirdPersonButton.MouseButton1Click:Connect(
 		function()
 
@@ -2045,7 +2263,7 @@ TrackConnection(
 					0,
 					0,
 					0,
-					760
+					900
 				)
 
 		end
@@ -2056,7 +2274,7 @@ TrackConnection(
 -- DRAGGING
 --==============================================================
 
-TrackConnection(
+Track(
 	TopBar.InputBegan:Connect(
 		function(input)
 
@@ -2080,16 +2298,19 @@ TrackConnection(
 							Enum.UserInputState.End then
 
 							Dragging = false
+
 						end
 
 					end
 				)
+
 			end
+
 		end
 	)
 )
 
-TrackConnection(
+Track(
 	UserInputService.InputChanged:Connect(
 		function(input)
 
@@ -2116,6 +2337,7 @@ TrackConnection(
 						DragStartPosition.Y.Offset +
 							delta.Y
 					)
+
 			end
 
 		end
@@ -2164,7 +2386,8 @@ FloatingButton.BorderSizePixel = 0
 FloatingButton.Font =
 	Enum.Font.GothamBlack
 
-FloatingButton.Text = "X"
+FloatingButton.Text =
+	"X"
 
 FloatingButton.TextSize = 22
 
@@ -2211,12 +2434,11 @@ FloatingStroke.Parent =
 -- CLOSE
 --==============================================================
 
-TrackConnection(
+Track(
 	CloseButton.MouseButton1Click:Connect(
 		function()
 
 			MainFrame.Visible = false
-
 			FloatingButton.Visible = true
 
 		end
@@ -2227,12 +2449,11 @@ TrackConnection(
 -- REOPEN
 --==============================================================
 
-TrackConnection(
+Track(
 	FloatingButton.MouseButton1Click:Connect(
 		function()
 
 			MainFrame.Visible = true
-
 			FloatingButton.Visible = false
 
 		end
@@ -2243,7 +2464,7 @@ TrackConnection(
 -- CONTROLLER INPUT
 --==============================================================
 
-TrackConnection(
+Track(
 	UserInputService.InputBegan:Connect(
 		function(input, processed)
 
@@ -2255,7 +2476,7 @@ TrackConnection(
 				input.KeyCode.Name
 
 			--==================================================
-			-- CONFIGURING LOCK BUTTON
+			-- BUTTON REBINDING
 			--==================================================
 
 			if WaitingForButton then
@@ -2272,10 +2493,11 @@ TrackConnection(
 				UpdateLockButtonDisplay()
 
 				return
+
 			end
 
 			--==================================================
-			-- NORMAL LOCK
+			-- LOCK TOGGLE
 			--==================================================
 
 			if input.KeyCode ==
@@ -2290,10 +2512,10 @@ TrackConnection(
 )
 
 --==============================================================
--- PLAYER LEAVING
+-- PLAYER REMOVING
 --==============================================================
 
-TrackConnection(
+Track(
 	Players.PlayerRemoving:Connect(
 		function(player)
 
@@ -2312,7 +2534,7 @@ TrackConnection(
 -- LOCAL PLAYER RESPAWN
 --==============================================================
 
-TrackConnection(
+Track(
 	LocalPlayer.CharacterAdded:Connect(
 		function()
 
@@ -2358,27 +2580,26 @@ local function GetFirstPersonAim()
 	end
 
 	local head =
-		character:FindFirstChild(
-			"Head"
-		)
+		character:FindFirstChild("Head")
 
-	if not head then
+	if head then
 
 		return GetPredictedPosition(
-			root.Position,
-			root.AssemblyLinearVelocity
+			head.Position,
+			head.AssemblyLinearVelocity
 		)
 
 	end
 
 	return GetPredictedPosition(
-		head.Position,
-		head.AssemblyLinearVelocity
+		root.Position,
+		root.AssemblyLinearVelocity
 	)
+
 end
 
 --==============================================================
--- THIRD PERSON STATIC SCREEN AIM
+-- THIRD PERSON ADAPTIVE AIM
 --==============================================================
 
 local function GetThirdPersonAim()
@@ -2408,95 +2629,90 @@ local function GetThirdPersonAim()
 	-- PREDICT FIRST
 	--==========================================================
 
-	local predicted =
+	local predictedPosition =
 		GetPredictedPosition(
 			root.Position,
 			root.AssemblyLinearVelocity
 		)
 
 	--==========================================================
-	-- PROJECT TO SCREEN
+	-- CAMERA -> TARGET DISTANCE
 	--==========================================================
-
-	local screenPosition, onScreen =
-		Camera:WorldToViewportPoint(
-			predicted
-		)
-
-	if not onScreen
-		or screenPosition.Z <= 0 then
-
-		return predicted
-	end
-
-	--==========================================================
-	-- STATIC SCREEN OFFSET
-	--==========================================================
-
-	-- Positive = below.
-	-- Negative = above.
-
-	local shiftedY =
-		screenPosition.Y +
-		Config.AimOffset
-
-	--==========================================================
-	-- DEPROJECT
-	--==========================================================
-
-	local ray =
-		Camera:ViewportPointToRay(
-			screenPosition.X,
-			shiftedY
-		)
-
-	-- Keep the same camera depth as target.
-
-	local cameraSpace =
-		Camera.CFrame:PointToObjectSpace(
-			predicted
-		)
-
-	local targetDepth =
-		-cameraSpace.Z
-
-	if targetDepth <= 0 then
-		return predicted
-	end
-
-	local forward =
-		ray.Direction:Dot(
-			Camera.CFrame.LookVector
-		)
-
-	if math.abs(forward) < 0.0001 then
-		return predicted
-	end
 
 	local distance =
-		targetDepth /
-		forward
+		(
+			predictedPosition -
+			Camera.CFrame.Position
+		).Magnitude
 
-	return ray.Origin +
-		ray.Direction *
-		distance
+	--==========================================================
+	-- ADAPTIVE STUD OFFSET
+	--==========================================================
+	--
+	-- Base setting:
+	--
+	-- 10
+	--
+	-- Reference distance:
+	--
+	-- 100 studs
+	--
+	-- Therefore approximately:
+	--
+	-- 50 studs  -> 5 studs
+	-- 100 studs -> 10 studs
+	-- 200 studs -> 20 studs
+	--
+	-- The offset changes automatically with distance.
+	--==========================================================
+
+	local referenceDistance =
+		math.max(
+			Config.ReferenceDistance,
+			1
+		)
+
+	local adaptiveOffset =
+		Config.AimOffset *
+		(
+			distance /
+			referenceDistance
+		)
+
+	-- Keep it within sane bounds.
+
+	adaptiveOffset =
+		math.clamp(
+			adaptiveOffset,
+			-100,
+			100
+		)
+
+	--==========================================================
+	-- FINAL AIM POINT
+	--==========================================================
+
+	local aimPosition =
+		predictedPosition -
+		Vector3.new(
+			0,
+			adaptiveOffset,
+			0
+		)
+
+	return aimPosition
+
 end
 
 --==============================================================
 -- CAMERA UPDATE
 --==============================================================
 
-local function UpdateCamera(
-	deltaTime
-)
+local function UpdateCamera(deltaTime)
 
 	if not IsLocked then
 		return
 	end
-
-	--==========================================================
-	-- STICKY TARGET
-	--==========================================================
 
 	local target =
 		LockedTarget
@@ -2506,21 +2722,26 @@ local function UpdateCamera(
 		Unlock()
 
 		return
+
 	end
 
 	--==========================================================
-	-- TARGET INVALID
+	-- STICKY TARGET PROTECTION
 	--==========================================================
-
-	-- IMPORTANT:
-	-- We unlock.
-	-- We NEVER select a replacement target.
+	--
+	-- Even when Sticky Aim is ON or OFF:
+	--
+	-- once a target is locked, we DO NOT replace it.
+	--
+	-- If it becomes invalid, we unlock.
+	--==========================================================
 
 	if not IsValidTarget(target) then
 
 		Unlock()
 
 		return
+
 	end
 
 	--==========================================================
@@ -2547,6 +2768,7 @@ local function UpdateCamera(
 		Unlock()
 
 		return
+
 	end
 
 	--==========================================================
@@ -2571,6 +2793,7 @@ local function UpdateCamera(
 		0.001 then
 
 		return
+
 	end
 
 	local desired =
@@ -2589,10 +2812,11 @@ local function UpdateCamera(
 			desired
 
 		return
+
 	end
 
 	--==========================================================
-	-- SMOOTH LOCK
+	-- SMOOTHING
 	--==========================================================
 
 	local alpha =
@@ -2615,20 +2839,16 @@ local function UpdateCamera(
 			desired,
 			alpha
 		)
+
 end
 
 --==============================================================
 -- CAMERA RENDER LOOP
 --==============================================================
 
--- Run after Roblox's normal camera update.
-
-local CameraPriority =
-	Enum.RenderPriority.Camera.Value + 1
-
 RunService:BindToRenderStep(
 	"XenonCameraLock",
-	CameraPriority,
+	Enum.RenderPriority.Last.Value,
 	function(deltaTime)
 
 		if Destroyed then
@@ -2638,9 +2858,7 @@ RunService:BindToRenderStep(
 		local success, errorMessage =
 			pcall(function()
 
-				UpdateCamera(
-					deltaTime
-				)
+				UpdateCamera(deltaTime)
 
 			end)
 
@@ -2652,22 +2870,27 @@ RunService:BindToRenderStep(
 			)
 
 			Unlock()
+
 		end
+
 	end
 )
 
 --==============================================================
--- FINAL STATUS
+-- FINALIZE
 --==============================================================
 
 UpdateStatus()
 UpdateLockButtonDisplay()
+UpdateStickyButton()
 
-print("----------------------------------------")
-print("XENON LOADED")
-print("Lock Button:", GetButtonName(Config.LockButton))
+print("========================================")
+print("XENON CONTROLLER SYSTEM LOADED")
+print("Lock:", GetButtonName(Config.LockButton))
 print("Mode:", Config.CameraMode)
+print("Sticky Aim:", Config.StickyAim)
 print("Offset:", Config.AimOffset)
+print("Reference Distance:", Config.ReferenceDistance)
 print("Smoothing:", Config.Smoothing)
 print("Prediction:", Config.Prediction)
-print("----------------------------------------")
+print("========================================")
