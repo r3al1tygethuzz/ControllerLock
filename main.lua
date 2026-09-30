@@ -396,7 +396,7 @@ MainFrame.Position = UDim2.fromScale(0.5, 0.5)
 MainFrame.BackgroundColor3 = BLACK
 MainFrame.BorderSizePixel = 0
 MainFrame.Visible = true
-MainFrame.ZIndex = 100000
+MainFrame.ZIndex = 1
 MainFrame.Parent = ScreenGui
 
 local MainCorner = Instance.new("UICorner")
@@ -705,6 +705,8 @@ local function UpdateResponsiveState()
         VisualsTab.Size = Scroll.Size
         WhitelistTab.Position = Scroll.Position
         WhitelistTab.Size = Scroll.Size
+        SupportedTab.Position = Scroll.Position
+        SupportedTab.Size = Scroll.Size
 
         for _, Button in pairs(TabButtons) do
             Button.TextSize = 9
@@ -749,6 +751,8 @@ local function UpdateResponsiveState()
         VisualsTab.Size = Scroll.Size
         WhitelistTab.Position = Scroll.Position
         WhitelistTab.Size = Scroll.Size
+        SupportedTab.Position = Scroll.Position
+        SupportedTab.Size = Scroll.Size
 
         for _, Button in pairs(TabButtons) do
             Button.TextSize = 10
@@ -786,6 +790,8 @@ local function UpdateResponsiveState()
         VisualsTab.Size = Scroll.Size
         WhitelistTab.Position = Scroll.Position
         WhitelistTab.Size = Scroll.Size
+        SupportedTab.Position = Scroll.Position
+        SupportedTab.Size = Scroll.Size
 
         for _, Button in pairs(TabButtons) do
             Button.TextSize = 11
