@@ -359,14 +359,30 @@ end
 -- GUI
 --==============================================================
 
+-- Remove stale XENON instances from previous executions.
+-- This prevents an old empty panel from sitting above the current UI.
+for _, Existing in ipairs(PlayerGui:GetChildren()) do
+    if Existing.Name == "Xenon" then
+        pcall(function() Existing:Destroy() end)
+    end
+end
+
+-- Some executors keep an earlier UI copy in CoreGui. Remove that too.
+pcall(function()
+    local ExistingCore = game:GetService("CoreGui"):FindFirstChild("Xenon")
+    if ExistingCore then
+        ExistingCore:Destroy()
+    end
+end)
+
 local ScreenGui = Instance.new("ScreenGui")
 ScreenGui.Name = "Xenon"
 ScreenGui.ResetOnSpawn = false
 ScreenGui.IgnoreGuiInset = false
-ScreenGui.ZIndexBehavior = Enum.ZIndexBehavior.Global
-
--- Keep XENON above other PlayerGui interfaces while it is open.
--- Closing the UI still hides the XENON interface normally.
+ScreenGui.Enabled = true
+-- Sibling ordering is safer here: descendants are not accidentally
+-- hidden behind their own parent when another UI is present.
+ScreenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
 ScreenGui.DisplayOrder = 1000000
 ScreenGui.Parent = PlayerGui
 
@@ -397,6 +413,8 @@ MainFrame.BackgroundColor3 = BLACK
 MainFrame.BorderSizePixel = 0
 MainFrame.Visible = true
 MainFrame.ZIndex = 1
+MainFrame.Active = true
+MainFrame.ClipsDescendants = false
 MainFrame.Parent = ScreenGui
 
 local MainCorner = Instance.new("UICorner")
