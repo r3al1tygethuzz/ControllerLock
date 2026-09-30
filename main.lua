@@ -71,7 +71,7 @@ local Config = {
     -- Lock safety checks
     WallCheck = true,
     KnockedCheck = true,
-    UnlockHealth = 5,
+    UnlockHealth = 10,
 
     -- ESP
     ESPEnabled = false,
@@ -82,6 +82,95 @@ local Config = {
     -- Aimbot whitelist protection
     AimbotWhitelistSkip = true,
 }
+
+--==============================================================
+-- PER-USER SETTINGS STORAGE
+--==============================================================
+-- Each Roblox account gets its own settings file. Values are loaded
+-- before the UI is created, so the controls open on the saved values.
+
+local SettingsFileName =
+    "XenonSettings_" .. tostring(LocalPlayer.UserId) .. ".json"
+
+local function SerializeConfig()
+    local Data = {}
+
+    for Key, Value in pairs(Config) do
+        if typeof(Value) == "EnumItem" then
+            Data[Key] = {
+                __type = "EnumItem",
+                enum = tostring(Value.EnumType),
+                name = Value.Name,
+            }
+        elseif type(Value) == "number"
+            or type(Value) == "boolean"
+            or type(Value) == "string" then
+            Data[Key] = Value
+        end
+    end
+
+    return Data
+end
+
+local function SaveSettings()
+    if type(writefile) ~= "function" then
+        return
+    end
+
+    pcall(function()
+        writefile(
+            SettingsFileName,
+            HttpService:JSONEncode(SerializeConfig())
+        )
+    end)
+end
+
+local function LoadSettings()
+    if type(isfile) ~= "function"
+        or type(readfile) ~= "function" then
+        return
+    end
+
+    local Success, Data = pcall(function()
+        if not isfile(SettingsFileName) then
+            return nil
+        end
+
+        return readfile(SettingsFileName)
+    end)
+
+    if not Success or not Data or Data == "" then
+        return
+    end
+
+    local DecodeSuccess, Saved = pcall(function()
+        return HttpService:JSONDecode(Data)
+    end)
+
+    if not DecodeSuccess or type(Saved) ~= "table" then
+        return
+    end
+
+    for Key, Value in pairs(Saved) do
+        if Config[Key] ~= nil then
+            if type(Value) == "table"
+                and Value.__type == "EnumItem"
+                and Key == "LockButton" then
+
+                local Button = Enum.KeyCode[Value.name]
+
+                if Button then
+                    Config[Key] = Button
+                end
+
+            elseif type(Value) == type(Config[Key]) then
+                Config[Key] = Value
+            end
+        end
+    end
+end
+
+LoadSettings()
 
 --==============================================================
 -- STATE
@@ -256,7 +345,7 @@ MainFrame.Position = UDim2.fromScale(0.5, 0.5)
 MainFrame.BackgroundColor3 = BLACK
 MainFrame.BorderSizePixel = 0
 MainFrame.Visible = true
-MainFrame.ZIndex = 100
+MainFrame.ZIndex = 100000
 MainFrame.Parent = ScreenGui
 
 local MainCorner = Instance.new("UICorner")
@@ -277,7 +366,7 @@ TopBar.Name = "TopBar"
 TopBar.BackgroundColor3 = DARK
 TopBar.BorderSizePixel = 0
 TopBar.Size = UDim2.new(1, 0, 0, 58)
-TopBar.ZIndex = 111
+TopBar.ZIndex = 11
 TopBar.Parent = MainFrame
 
 local TopCorner = Instance.new("UICorner")
@@ -289,7 +378,7 @@ TopBottom.BackgroundColor3 = DARK
 TopBottom.BorderSizePixel = 0
 TopBottom.Position = UDim2.new(0, 0, 1, -14)
 TopBottom.Size = UDim2.new(1, 0, 0, 14)
-TopBottom.ZIndex = 111
+TopBottom.ZIndex = 11
 TopBottom.Parent = TopBar
 
 --==============================================================
@@ -305,7 +394,7 @@ Title.Text = "XENON"
 Title.TextColor3 = WHITE
 Title.TextSize = 21
 Title.TextXAlignment = Enum.TextXAlignment.Left
-Title.ZIndex = 112
+Title.ZIndex = 12
 Title.Parent = TopBar
 
 local Subtitle = Instance.new("TextLabel")
@@ -317,7 +406,7 @@ Subtitle.Text = "CONTROLLER CAMERA LOCK"
 Subtitle.TextColor3 = GRAY
 Subtitle.TextSize = 9
 Subtitle.TextXAlignment = Enum.TextXAlignment.Left
-Subtitle.ZIndex = 112
+Subtitle.ZIndex = 12
 Subtitle.Parent = TopBar
 
 --==============================================================
@@ -335,7 +424,7 @@ CloseButton.TextColor3 = WHITE
 CloseButton.TextSize = 24
 CloseButton.Font = Enum.Font.GothamBold
 CloseButton.AutoButtonColor = false
-CloseButton.ZIndex = 120
+CloseButton.ZIndex = 20
 CloseButton.Parent = TopBar
 
 local CloseCorner = Instance.new("UICorner")
@@ -356,7 +445,7 @@ Scroll.CanvasSize = UDim2.fromOffset(0, 1200)
 Scroll.ScrollBarThickness = 3
 Scroll.ScrollBarImageColor3 = RED
 Scroll.ScrollingDirection = Enum.ScrollingDirection.Y
-Scroll.ZIndex = 111
+Scroll.ZIndex = 11
 Scroll.Parent = MainFrame
 
 local function ConfigureTabContainer(Container, Name)
@@ -369,7 +458,7 @@ local function ConfigureTabContainer(Container, Name)
     Container.ScrollBarThickness = 3
     Container.ScrollBarImageColor3 = RED
     Container.ScrollingDirection = Enum.ScrollingDirection.Y
-    Container.ZIndex = 111
+    Container.ZIndex = 11
     Container.Visible = false
     Container.Parent = MainFrame
 
@@ -412,7 +501,7 @@ TabBar.BackgroundColor3 = DARK
 TabBar.BorderSizePixel = 0
 TabBar.Position = UDim2.new(0, 10, 0, 66)
 TabBar.Size = UDim2.new(1, -20, 0, 38)
-TabBar.ZIndex = 120
+TabBar.ZIndex = 20
 TabBar.Parent = MainFrame
 
 local TabBarCorner = Instance.new("UICorner")
@@ -449,7 +538,7 @@ local function CreateTab(Name, Order)
     Button.TextSize = 11
     Button.Font = Enum.Font.GothamSemibold
     Button.AutoButtonColor = false
-    Button.ZIndex = 122
+    Button.ZIndex = 22
     Button.Parent = TabBar
 
     local Indicator = Instance.new("Frame")
@@ -460,7 +549,7 @@ local function CreateTab(Name, Order)
     Indicator.BackgroundColor3 = RED
     Indicator.BorderSizePixel = 0
     Indicator.Visible = false
-    Indicator.ZIndex = 123
+    Indicator.ZIndex = 23
     Indicator.Parent = Button
 
     TabButtons[Name] = Button
@@ -679,7 +768,7 @@ FloatingToggle.TextColor3 = WHITE
 FloatingToggle.TextSize = 18
 FloatingToggle.Font = Enum.Font.GothamBold
 FloatingToggle.AutoButtonColor = false
-FloatingToggle.ZIndex = 1000000
+FloatingToggle.ZIndex = 100000
 FloatingToggle.Parent = ScreenGui
 
 local FloatingCorner = Instance.new("UICorner")
@@ -712,7 +801,7 @@ local function CreateSection(Text)
     Section.TextXAlignment =
         Enum.TextXAlignment.Left
 
-    Section.ZIndex = 112
+    Section.ZIndex = 12
     Section.Parent = CurrentTabContainer
 
     return Section
@@ -731,7 +820,7 @@ local function CreateRow(Height)
     Row.Size =
         UDim2.new(1, 0, 0, Height)
 
-    Row.ZIndex = 112
+    Row.ZIndex = 12
     Row.Parent = CurrentTabContainer
 
     local Corner = Instance.new("UICorner")
@@ -770,7 +859,7 @@ local function CreateLabel(Parent, Text)
     Label.TextXAlignment =
         Enum.TextXAlignment.Left
 
-    Label.ZIndex = 113
+    Label.ZIndex = 13
     Label.Parent = Parent
 
     return Label
@@ -807,7 +896,7 @@ CameraButton.TextColor3 = WHITE
 CameraButton.TextSize = IsMobile and 10 or 12
 CameraButton.Font = Enum.Font.GothamMedium
 CameraButton.AutoButtonColor = false
-CameraButton.ZIndex = 113
+CameraButton.ZIndex = 13
 CameraButton.Parent = CameraRow
 
 local CameraCorner = Instance.new("UICorner")
@@ -828,7 +917,7 @@ CameraOptions.Size =
 
 CameraOptions.BackgroundColor3 = DARKER
 CameraOptions.BorderSizePixel = 0
-CameraOptions.ZIndex = 150
+CameraOptions.ZIndex = 50
 CameraOptions.Parent = CameraRow
 
 local CameraOptionsCorner = Instance.new("UICorner")
@@ -851,11 +940,12 @@ local function CreateCameraOption(Text)
     Option.TextSize = IsMobile and 9 or 11
     Option.Font = Enum.Font.Gotham
     Option.AutoButtonColor = false
-    Option.ZIndex = 151
+    Option.ZIndex = 51
     Option.Parent = CameraOptions
 
     Option.Activated:Connect(function()
         Config.CameraMode = Text
+        SaveSettings()
         CameraButton.Text = Text
         CameraOptions.Visible = false
     end)
@@ -902,7 +992,7 @@ local function CreateInputRow(LabelText, DefaultValue)
     Box.TextSize = IsMobile and 10 or 12
     Box.Font = Enum.Font.GothamMedium
     Box.TextXAlignment = Enum.TextXAlignment.Center
-    Box.ZIndex = 113
+    Box.ZIndex = 13
     Box.Parent = Row
 
     local Corner = Instance.new("UICorner")
@@ -930,6 +1020,7 @@ OffsetBox.FocusLost:Connect(function()
             math.clamp(Number, -100, 100)
 
         Config.AimOffset = Number
+        SaveSettings()
 
         OffsetBox.Text =
             tostring(Number)
@@ -956,6 +1047,7 @@ SmoothBox.FocusLost:Connect(function()
         Number = math.max(0, Number)
 
         Config.Smoothing = Number
+        SaveSettings()
 
         SmoothBox.Text =
             tostring(Number)
@@ -982,6 +1074,7 @@ PredictionBox.FocusLost:Connect(function()
         Number = math.max(0, Number)
 
         Config.Prediction = Number
+        SaveSettings()
 
         PredictionBox.Text =
             tostring(Number)
@@ -1020,7 +1113,7 @@ local function CreateToggleRow(
     Button.TextSize = IsMobile and 10 or 11
     Button.Font = Enum.Font.GothamBold
     Button.AutoButtonColor = false
-    Button.ZIndex = 113
+    Button.ZIndex = 13
     Button.Parent = Row
 
     local Corner = Instance.new("UICorner")
@@ -1061,6 +1154,7 @@ local StickyRow, StickyButton =
 
         function(Value)
             Config.StickyAim = Value
+            SaveSettings()
         end
     )
 
@@ -1078,6 +1172,7 @@ local AimWhitelistRow, AimWhitelistButton =
 
         function(Value)
             Config.AimbotWhitelistSkip = Value
+            SaveSettings()
 
             -- If currently locked onto someone who is
             -- now protected, immediately unlock.
@@ -1104,6 +1199,7 @@ local WallCheckRow, WallCheckButton =
 
         function(Value)
             Config.WallCheck = Value
+            SaveSettings()
 
             -- Re-check the current target immediately when enabled.
             if Value and LockedTarget then
@@ -1123,6 +1219,7 @@ local KnockedRow, KnockedButton =
 
         function(Value)
             Config.KnockedCheck = Value
+            SaveSettings()
 
             -- If the current target is already below the unlock
             -- threshold, immediately release the lock when enabled.
@@ -1150,6 +1247,7 @@ HealthBox.FocusLost:Connect(function()
     if Number then
         Number = math.max(0, Number)
         Config.UnlockHealth = Number
+        SaveSettings()
         HealthBox.Text = tostring(Number)
 
         -- If the new threshold makes the current target invalid,
@@ -1204,7 +1302,7 @@ LockButtonDisplay.TextSize = IsMobile and 8 or 10
 LockButtonDisplay.Font =
     Enum.Font.GothamBold
 
-LockButtonDisplay.ZIndex = 113
+LockButtonDisplay.ZIndex = 13
 LockButtonDisplay.Parent = LockRow
 
 local LockCorner = Instance.new("UICorner")
@@ -1228,7 +1326,7 @@ RebindButton.TextColor3 = WHITE
 RebindButton.TextSize = IsMobile and 10 or 12
 RebindButton.Font = Enum.Font.GothamBold
 RebindButton.AutoButtonColor = false
-RebindButton.ZIndex = 113
+RebindButton.ZIndex = 13
 RebindButton.Parent = RebindRow
 
 local RebindCorner = Instance.new("UICorner")
@@ -1252,6 +1350,7 @@ local ESPEnabledRow, ESPEnabledButton =
 
         function(Value)
             Config.ESPEnabled = Value
+            SaveSettings()
         end
     )
 
@@ -1265,6 +1364,7 @@ local ESPNameRow, ESPNameButton =
 
         function(Value)
             Config.ESPShowName = Value
+            SaveSettings()
         end
     )
 
@@ -1278,6 +1378,7 @@ local ESPOutlineRow, ESPOutlineButton =
 
         function(Value)
             Config.ESPShowOutline = Value
+            SaveSettings()
         end
     )
 
@@ -1291,6 +1392,7 @@ local ESPWhitelistRow, ESPWhitelistButton =
 
         function(Value)
             Config.ESPWhitelistCheck = Value
+            SaveSettings()
         end
     )
 
@@ -1327,7 +1429,7 @@ WhitelistInfo.TextXAlignment =
 WhitelistInfo.TextYAlignment =
     Enum.TextYAlignment.Center
 
-WhitelistInfo.ZIndex = 113
+WhitelistInfo.ZIndex = 13
 WhitelistInfo.Parent = WhitelistInfoRow
 
 local WhitelistContainer = Instance.new("Frame")
@@ -1339,17 +1441,17 @@ WhitelistContainer.BackgroundTransparency = 1
 WhitelistContainer.Size =
     UDim2.new(1, 0, 0, 10)
 
-WhitelistContainer.ZIndex = 112
+WhitelistContainer.ZIndex = 12
 WhitelistContainer.Parent = CurrentTabContainer
 
-local WhitelistEntryLayout = Instance.new("UIListLayout")
-WhitelistEntryLayout.Padding =
+local WhitelistLayout = Instance.new("UIListLayout")
+WhitelistLayout.Padding =
     UDim.new(0, 6)
 
-WhitelistEntryLayout.SortOrder =
+WhitelistLayout.SortOrder =
     Enum.SortOrder.LayoutOrder
 
-WhitelistEntryLayout.Parent =
+WhitelistLayout.Parent =
     WhitelistContainer
 
 --==============================================================
@@ -1379,7 +1481,7 @@ StatusLabel.TextSize = IsMobile and 12 or 14
 StatusLabel.TextXAlignment =
     Enum.TextXAlignment.Left
 
-StatusLabel.ZIndex = 113
+StatusLabel.ZIndex = 13
 StatusLabel.Parent = StatusRow
 
 local TargetLabel = Instance.new("TextLabel")
@@ -1402,7 +1504,7 @@ TargetLabel.TextSize = IsMobile and 9 or 10
 TargetLabel.TextXAlignment =
     Enum.TextXAlignment.Left
 
-TargetLabel.ZIndex = 113
+TargetLabel.ZIndex = 13
 TargetLabel.Parent = StatusRow
 
 --==============================================================
@@ -1410,10 +1512,10 @@ TargetLabel.Parent = StatusRow
 --==============================================================
 
 local function ClearWhitelistUI()
-    -- Whitelist entries are TextButtons, not Frames.
-    -- Destroy every generated entry so refreshes can never stack duplicates.
-    for _, Child in ipairs(WhitelistContainer:GetChildren()) do
-        if Child:IsA("GuiButton") or Child.Name:match("^Whitelist_") then
+    for _, Child in ipairs(
+        WhitelistContainer:GetChildren()
+    ) do
+        if Child:IsA("Frame") then
             Child:Destroy()
         end
     end
@@ -1452,7 +1554,7 @@ local function CreateWhitelistEntry(Player)
         Enum.TextXAlignment.Left
 
     Entry.AutoButtonColor = false
-    Entry.ZIndex = 113
+    Entry.ZIndex = 13
     Entry.Parent = WhitelistContainer
 
     local Padding = Instance.new("UIPadding")
@@ -1521,7 +1623,7 @@ local function RefreshWhitelistUI()
                 1,
                 0,
                 0,
-                WhitelistEntryLayout.AbsoluteContentSize.Y
+                WhitelistLayout.AbsoluteContentSize.Y
             )
     end)
 end
@@ -1864,45 +1966,44 @@ local function IsHeadVisible(Player)
     end
 
     local Character = Player.Character
-    local CurrentCamera = workspace.CurrentCamera
-
-    if not Character or not CurrentCamera then
+    if not Character then
         return false
     end
 
     local Head = Character:FindFirstChild("Head")
+    local CurrentCamera = workspace.CurrentCamera
 
-    if not Head or not Head:IsA("BasePart") then
+    if not Head or not CurrentCamera then
         return false
     end
 
-    -- Use Roblox's built-in camera occlusion query instead of a single ray.
-    -- This avoids false negatives caused by the target's own accessories/body
-    -- and correctly handles walls/doors/props between the camera and the head.
-    local IgnoreList = {
-        LocalPlayer.Character,
-        Character,
-    }
+    local Origin = CurrentCamera.CFrame.Position
+    local Direction = Head.Position - Origin
 
-    local ObscuringParts = CurrentCamera:GetPartsObscuringTarget(
-        { Head.Position },
-        IgnoreList
-    )
-
-    if #ObscuringParts == 0 then
+    if Direction.Magnitude <= 0.01 then
         return true
     end
 
-    -- Ignore fully transparent/non-collidable decorative parts when possible.
-    for _, Part in ipairs(ObscuringParts) do
-        if Part and Part:IsA("BasePart") then
-            if Part.Transparency < 0.95 and Part.CanQuery then
-                return false
-            end
-        end
+    local Params = RaycastParams.new()
+    Params.FilterType = Enum.RaycastFilterType.Exclude
+    Params.FilterDescendantsInstances = {
+        LocalPlayer.Character
+    }
+    Params.IgnoreWater = true
+
+    local Result = workspace:Raycast(
+        Origin,
+        Direction,
+        Params
+    )
+
+    if not Result then
+        return true
     end
 
-    return true
+    -- Any hit belonging to the target means there is no wall between
+    -- the camera and the target's head. Otherwise something is blocking it.
+    return Result.Instance:IsDescendantOf(Character)
 end
 
 local function IsTargetLockable(Player)
@@ -1914,52 +2015,132 @@ local function IsTargetLockable(Player)
         return false
     end
 
-    -- Wall checking is intentionally NOT done here. Candidate selection can
-    -- examine many players; doing an occlusion query for every candidate is
-    -- unnecessary work. The chosen target is checked before locking and on
-    -- every render frame while locked.
+    if Config.WallCheck and not IsHeadVisible(Player) then
+        return false
+    end
+
     return true
 end
 
 
 --==============================================================
--- CAMERA CENTER TARGET
+-- CONTROLLER DOT TARGET
 --==============================================================
 
-local function GetClosestToCursor()
-    local CurrentCamera =
-        workspace.CurrentCamera
+local ControllerDotNames = {
+    ControllerDot = true,
+    ControllerCursor = true,
+    ControllerReticle = true,
+    AimDot = true,
+    AimCursor = true,
+    CrosshairDot = true,
+    TargetDot = true,
+    LockDot = true,
+    Reticle = true,
+    Crosshair = true,
+    Cursor = true,
+}
+
+local function GetControllerDotPosition()
+    local CurrentCamera = workspace.CurrentCamera
 
     if not CurrentCamera then
         return nil
     end
 
-    local Viewport =
-        CurrentCamera.ViewportSize
+    local Viewport = CurrentCamera.ViewportSize
+    local ScreenCenter =
+        Vector2.new(Viewport.X * 0.5, Viewport.Y * 0.5)
 
-    local Center =
-        Vector2.new(
-            Viewport.X / 2,
-            Viewport.Y / 2
-        )
+    local BestPosition = nil
+    local BestScore = math.huge
+
+    -- Prefer an actual game UI reticle/dot when the game exposes one.
+    for _, Object in ipairs(PlayerGui:GetDescendants()) do
+        if Object:IsA("GuiObject")
+            and Object.Visible
+            and ControllerDotNames[Object.Name] then
+
+            local Size = Object.AbsoluteSize
+
+            -- Ignore large menus/panels that happen to use a reticle-like name.
+            if Size.X <= 80 and Size.Y <= 80 then
+                local Position =
+                    Object.AbsolutePosition + Size * 0.5
+
+                local DistanceFromCenter =
+                    (Position - ScreenCenter).Magnitude
+
+                local Area = math.max(Size.X * Size.Y, 1)
+
+                local Score =
+                    DistanceFromCenter +
+                    math.sqrt(Area) * 0.15
+
+                if Score < BestScore then
+                    BestScore = Score
+                    BestPosition = Position
+                end
+            end
+        end
+    end
+
+    if BestPosition then
+        return BestPosition
+    end
+
+    -- Fallback for games that do not expose the controller dot as a GUI
+    -- object: use the camera center rather than the mouse position.
+    return ScreenCenter
+end
+
+local function GetTargetScreenPosition(Player)
+    local CurrentCamera = workspace.CurrentCamera
+
+    if not CurrentCamera then
+        return nil, false
+    end
+
+    local Character = Player and Player.Character
+    if not Character then
+        return nil, false
+    end
+
+    local Head = Character:FindFirstChild("Head")
+    local Root = Character:FindFirstChild("HumanoidRootPart")
+
+    local Position =
+        Head and Head.Position
+        or Root and Root.Position
+
+    if not Position then
+        return nil, false
+    end
+
+    return CurrentCamera:WorldToViewportPoint(Position)
+end
+
+local function GetClosestToControllerDot()
+    local CurrentCamera = workspace.CurrentCamera
+
+    if not CurrentCamera then
+        return nil
+    end
+
+    local DotPosition = GetControllerDotPosition()
+    if not DotPosition then
+        return nil
+    end
 
     local BestPlayer = nil
     local BestDistance = math.huge
 
-    for _, Player in ipairs(
-        Players:GetPlayers()
-    ) do
-
-        if
-            not (
-                Config.AimbotWhitelistSkip
-                and IsWhitelisted(Player)
-            )
-        then
-
-            local Character,
-                Humanoid,
-                Root =
+    for _, Player in ipairs(Players:GetPlayers()) do
+        if not (
+            Config.AimbotWhitelistSkip
+            and IsWhitelisted(Player)
+        ) then
+            local Character, Humanoid, Root =
                 GetCharacterData(Player)
 
             if Character
@@ -1968,40 +2149,24 @@ local function GetClosestToCursor()
                 and IsTargetLockable(Player) then
 
                 local WorldDistance =
-                    (
-                        Root.Position -
-                        CurrentCamera.CFrame.Position
-                    ).Magnitude
+                    (Root.Position - CurrentCamera.CFrame.Position).Magnitude
 
-                if WorldDistance <=
-                    Config.MaxTargetDistance then
+                if WorldDistance <= Config.MaxTargetDistance then
+                    local ScreenPosition, OnScreen =
+                        GetTargetScreenPosition(Player)
 
-                    local ScreenPosition,
-                        OnScreen =
-                        CurrentCamera:WorldToViewportPoint(
-                            Root.Position
-                        )
-
-                    if OnScreen
-                        and ScreenPosition.Z > 0 then
-
+                    if OnScreen and ScreenPosition.Z > 0 then
                         local ScreenDistance =
                             (
                                 Vector2.new(
                                     ScreenPosition.X,
                                     ScreenPosition.Y
-                                ) -
-                                Center
+                                ) - DotPosition
                             ).Magnitude
 
-                        if ScreenDistance <
-                            BestDistance then
-
-                            BestDistance =
-                                ScreenDistance
-
-                            BestPlayer =
-                                Player
+                        if ScreenDistance < BestDistance then
+                            BestDistance = ScreenDistance
+                            BestPlayer = Player
                         end
                     end
                 end
@@ -2078,7 +2243,7 @@ end
 
 local function FindTarget()
     if Config.StickyAim then
-        return GetClosestToCursor()
+        return GetClosestToControllerDot()
     end
 
     return GetClosestByDistance()
@@ -2306,13 +2471,6 @@ local function Lock()
         return
     end
 
-    -- Perform the wall check once on the chosen target before engaging.
-    -- While locked, IsTargetValid performs the same check every render frame.
-    if Config.WallCheck and not IsHeadVisible(Target) then
-        UpdateStatus()
-        return
-    end
-
     LockedTarget =
         Target
 
@@ -2427,6 +2585,8 @@ Connect(
 
                 Config.LockButton =
                     Input.KeyCode
+
+                SaveSettings()
 
                 LockButtonDisplay.Text =
                     Input.KeyCode.Name
@@ -2727,7 +2887,7 @@ WhitelistLayout:GetPropertyChangedSignal(
                 1,
                 0,
                 0,
-                WhitelistEntryLayout.AbsoluteContentSize.Y
+                WhitelistLayout.AbsoluteContentSize.Y
             )
     end
 )
@@ -2751,6 +2911,7 @@ end)
 --==============================================================
 
 _G.XenonCleanup = function()
+    SaveSettings()
 
     pcall(function()
         RunService:UnbindFromRenderStep(
@@ -2780,6 +2941,7 @@ end
 -- INITIAL STATUS
 --==============================================================
 
+SaveSettings()
 UpdateStatus()
 
 print("======================================")
