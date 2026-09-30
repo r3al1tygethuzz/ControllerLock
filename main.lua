@@ -47,7 +47,7 @@ local Config = {
     CameraMode = "Third Person",
 
     -- 3P offset now starts at 23.5
-    AimOffset = 9.25,
+    AimOffset = 23.5,
 
     -- Distance where the 3P Offset value is exact.
     ReferenceDistance = 40,
@@ -60,19 +60,24 @@ local Config = {
     ThirdPersonMinOffset = 0,
     ThirdPersonMaxOffset = 100,
 
-    Smoothing = 3,
+    Smoothing = 0,
 
-    Prediction = 0.02,
+    Prediction = 0.08,
 
     MaxTargetDistance = 500,
 
     StickyAim = true,
 
+    -- Lock safety checks
+    WallCheck = true,
+    KnockedCheck = true,
+    UnlockHealth = 10,
+
     -- ESP
     ESPEnabled = false,
     ESPShowName = true,
     ESPShowOutline = true,
-    ESPWhitelistCheck = false,
+    ESPWhitelistCheck = true,
 
     -- Aimbot whitelist protection
     AimbotWhitelistSkip = true,
@@ -218,7 +223,11 @@ local ScreenGui = Instance.new("ScreenGui")
 ScreenGui.Name = "Xenon"
 ScreenGui.ResetOnSpawn = false
 ScreenGui.IgnoreGuiInset = false
-ScreenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+ScreenGui.ZIndexBehavior = Enum.ZIndexBehavior.Global
+
+-- Keep XENON above other PlayerGui interfaces while it is open.
+-- Closing the UI still hides the XENON interface normally.
+ScreenGui.DisplayOrder = 1000000
 ScreenGui.Parent = PlayerGui
 
 --==============================================================
@@ -247,7 +256,7 @@ MainFrame.Position = UDim2.fromScale(0.5, 0.5)
 MainFrame.BackgroundColor3 = BLACK
 MainFrame.BorderSizePixel = 0
 MainFrame.Visible = true
-MainFrame.ZIndex = 10
+MainFrame.ZIndex = 100000
 MainFrame.Parent = ScreenGui
 
 local MainCorner = Instance.new("UICorner")
@@ -670,7 +679,7 @@ FloatingToggle.TextColor3 = WHITE
 FloatingToggle.TextSize = 18
 FloatingToggle.Font = Enum.Font.GothamBold
 FloatingToggle.AutoButtonColor = false
-FloatingToggle.ZIndex = 100
+FloatingToggle.ZIndex = 100000
 FloatingToggle.Parent = ScreenGui
 
 local FloatingCorner = Instance.new("UICorner")
@@ -1080,6 +1089,84 @@ local AimWhitelistRow, AimWhitelistButton =
             end
         end
     )
+
+--==============================================================
+-- LOCK SAFETY CHECKS
+--==============================================================
+
+local WallCheckRow, WallCheckButton =
+    CreateToggleRow(
+        "Wall Check",
+
+        function()
+            return Config.WallCheck
+        end,
+
+        function(Value)
+            Config.WallCheck = Value
+
+            -- Re-check the current target immediately when enabled.
+            if Value and LockedTarget then
+                -- Validation also checks the knocked/health condition.
+                -- The render loop will perform the full check next frame.
+            end
+        end
+    )
+
+local KnockedRow, KnockedButton =
+    CreateToggleRow(
+        "Knocked Check",
+
+        function()
+            return Config.KnockedCheck
+        end,
+
+        function(Value)
+            Config.KnockedCheck = Value
+
+            -- If the current target is already below the unlock
+            -- threshold, immediately release the lock when enabled.
+            if Value and LockedTarget then
+                local Character = LockedTarget.Character
+                local Humanoid = Character and Character:FindFirstChildOfClass("Humanoid")
+
+                if Humanoid and Humanoid.Health <= Config.UnlockHealth then
+                    Locked = false
+                    LockedTarget = nil
+                end
+            end
+        end
+    )
+
+local HealthRow, HealthBox =
+    CreateInputRow(
+        "Unlock Health",
+        Config.UnlockHealth
+    )
+
+HealthBox.FocusLost:Connect(function()
+    local Number = tonumber(HealthBox.Text)
+
+    if Number then
+        Number = math.max(0, Number)
+        Config.UnlockHealth = Number
+        HealthBox.Text = tostring(Number)
+
+        -- If the new threshold makes the current target invalid,
+        -- unlock immediately instead of waiting for the next frame.
+        if LockedTarget and Config.KnockedCheck then
+            local Character = LockedTarget.Character
+            local Humanoid = Character and Character:FindFirstChildOfClass("Humanoid")
+
+            if Humanoid and Humanoid.Health <= Config.UnlockHealth then
+                Locked = false
+                LockedTarget = nil
+            end
+        end
+    else
+        HealthBox.Text = tostring(Config.UnlockHealth)
+    end
+end)
 
 --==============================================================
 -- CONTROLLER
@@ -1750,6 +1837,91 @@ local function GetLocalRoot()
 end
 
 --==============================================================
+-- LOCK SAFETY CHECKS
+--==============================================================
+
+local function IsTargetBelowUnlockHealth(Player)
+    if not Player then
+        return true
+    end
+
+    local Character = Player.Character
+    if not Character then
+        return true
+    end
+
+    local Humanoid = Character:FindFirstChildOfClass("Humanoid")
+    if not Humanoid then
+        return true
+    end
+
+    return Humanoid.Health <= Config.UnlockHealth
+end
+
+local function IsHeadVisible(Player)
+    if not Player then
+        return false
+    end
+
+    local Character = Player.Character
+    if not Character then
+        return false
+    end
+
+    local Head = Character:FindFirstChild("Head")
+    local CurrentCamera = workspace.CurrentCamera
+
+    if not Head or not CurrentCamera then
+        return false
+    end
+
+    local Origin = CurrentCamera.CFrame.Position
+    local Direction = Head.Position - Origin
+
+    if Direction.Magnitude <= 0.01 then
+        return true
+    end
+
+    local Params = RaycastParams.new()
+    Params.FilterType = Enum.RaycastFilterType.Exclude
+    Params.FilterDescendantsInstances = {
+        LocalPlayer.Character
+    }
+    Params.IgnoreWater = true
+
+    local Result = workspace:Raycast(
+        Origin,
+        Direction,
+        Params
+    )
+
+    if not Result then
+        return true
+    end
+
+    -- Any hit belonging to the target means there is no wall between
+    -- the camera and the target's head. Otherwise something is blocking it.
+    return Result.Instance:IsDescendantOf(Character)
+end
+
+local function IsTargetLockable(Player)
+    if not Player then
+        return false
+    end
+
+    if Config.KnockedCheck and IsTargetBelowUnlockHealth(Player) then
+        return false
+    end
+
+    if Config.WallCheck and not IsHeadVisible(Player) then
+        return false
+    end
+
+    return true
+end
+
+
+--==============================================================
 -- CAMERA CENTER TARGET
 --==============================================================
 
@@ -1791,7 +1963,8 @@ local function GetClosestToCursor()
 
             if Character
                 and Humanoid
-                and Root then
+                and Root
+                and IsTargetLockable(Player) then
 
                 local WorldDistance =
                     (
@@ -1873,7 +2046,8 @@ local function GetClosestByDistance()
 
             if Character
                 and Humanoid
-                and Root then
+                and Root
+                and IsTargetLockable(Player) then
 
                 local Distance =
                     (
@@ -2126,6 +2300,11 @@ local function Lock()
         return
     end
 
+    if not IsTargetLockable(Target) then
+        UpdateStatus()
+        return
+    end
+
     LockedTarget =
         Target
 
@@ -2158,9 +2337,28 @@ local function IsTargetValid(Player)
         Root =
         GetCharacterData(Player)
 
-    return Character ~= nil
-        and Humanoid ~= nil
-        and Root ~= nil
+    if Character == nil
+        or Humanoid == nil
+        or Root == nil then
+
+        return false
+    end
+
+    -- WallCheck is deliberately evaluated every render frame so a target
+    -- can immediately unlock when they move behind cover.
+    if Config.KnockedCheck
+        and IsTargetBelowUnlockHealth(Player) then
+
+        return false
+    end
+
+    if Config.WallCheck
+        and not IsHeadVisible(Player) then
+
+        return false
+    end
+
+    return true
 end
 
 --==============================================================
