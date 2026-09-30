@@ -1342,14 +1342,14 @@ WhitelistContainer.Size =
 WhitelistContainer.ZIndex = 112
 WhitelistContainer.Parent = CurrentTabContainer
 
-local WhitelistLayout = Instance.new("UIListLayout")
-WhitelistLayout.Padding =
+local WhitelistEntryLayout = Instance.new("UIListLayout")
+WhitelistEntryLayout.Padding =
     UDim.new(0, 6)
 
-WhitelistLayout.SortOrder =
+WhitelistEntryLayout.SortOrder =
     Enum.SortOrder.LayoutOrder
 
-WhitelistLayout.Parent =
+WhitelistEntryLayout.Parent =
     WhitelistContainer
 
 --==============================================================
@@ -1410,10 +1410,10 @@ TargetLabel.Parent = StatusRow
 --==============================================================
 
 local function ClearWhitelistUI()
-    for _, Child in ipairs(
-        WhitelistContainer:GetChildren()
-    ) do
-        if Child:IsA("Frame") then
+    -- Whitelist entries are TextButtons, not Frames.
+    -- Destroy every generated entry so refreshes can never stack duplicates.
+    for _, Child in ipairs(WhitelistContainer:GetChildren()) do
+        if Child:IsA("GuiButton") or Child.Name:match("^Whitelist_") then
             Child:Destroy()
         end
     end
@@ -1521,7 +1521,7 @@ local function RefreshWhitelistUI()
                 1,
                 0,
                 0,
-                WhitelistLayout.AbsoluteContentSize.Y
+                WhitelistEntryLayout.AbsoluteContentSize.Y
             )
     end)
 end
@@ -1864,44 +1864,45 @@ local function IsHeadVisible(Player)
     end
 
     local Character = Player.Character
-    if not Character then
+    local CurrentCamera = workspace.CurrentCamera
+
+    if not Character or not CurrentCamera then
         return false
     end
 
     local Head = Character:FindFirstChild("Head")
-    local CurrentCamera = workspace.CurrentCamera
 
-    if not Head or not CurrentCamera then
+    if not Head or not Head:IsA("BasePart") then
         return false
     end
 
-    local Origin = CurrentCamera.CFrame.Position
-    local Direction = Head.Position - Origin
-
-    if Direction.Magnitude <= 0.01 then
-        return true
-    end
-
-    local Params = RaycastParams.new()
-    Params.FilterType = Enum.RaycastFilterType.Exclude
-    Params.FilterDescendantsInstances = {
-        LocalPlayer.Character
+    -- Use Roblox's built-in camera occlusion query instead of a single ray.
+    -- This avoids false negatives caused by the target's own accessories/body
+    -- and correctly handles walls/doors/props between the camera and the head.
+    local IgnoreList = {
+        LocalPlayer.Character,
+        Character,
     }
-    Params.IgnoreWater = true
 
-    local Result = workspace:Raycast(
-        Origin,
-        Direction,
-        Params
+    local ObscuringParts = CurrentCamera:GetPartsObscuringTarget(
+        { Head.Position },
+        IgnoreList
     )
 
-    if not Result then
+    if #ObscuringParts == 0 then
         return true
     end
 
-    -- Any hit belonging to the target means there is no wall between
-    -- the camera and the target's head. Otherwise something is blocking it.
-    return Result.Instance:IsDescendantOf(Character)
+    -- Ignore fully transparent/non-collidable decorative parts when possible.
+    for _, Part in ipairs(ObscuringParts) do
+        if Part and Part:IsA("BasePart") then
+            if Part.Transparency < 0.95 and Part.CanQuery then
+                return false
+            end
+        end
+    end
+
+    return true
 end
 
 local function IsTargetLockable(Player)
@@ -1913,10 +1914,10 @@ local function IsTargetLockable(Player)
         return false
     end
 
-    if Config.WallCheck and not IsHeadVisible(Player) then
-        return false
-    end
-
+    -- Wall checking is intentionally NOT done here. Candidate selection can
+    -- examine many players; doing an occlusion query for every candidate is
+    -- unnecessary work. The chosen target is checked before locking and on
+    -- every render frame while locked.
     return true
 end
 
@@ -2301,6 +2302,13 @@ local function Lock()
     end
 
     if not IsTargetLockable(Target) then
+        UpdateStatus()
+        return
+    end
+
+    -- Perform the wall check once on the chosen target before engaging.
+    -- While locked, IsTargetValid performs the same check every render frame.
+    if Config.WallCheck and not IsHeadVisible(Target) then
         UpdateStatus()
         return
     end
@@ -2719,7 +2727,7 @@ WhitelistLayout:GetPropertyChangedSignal(
                 1,
                 0,
                 0,
-                WhitelistLayout.AbsoluteContentSize.Y
+                WhitelistEntryLayout.AbsoluteContentSize.Y
             )
     end
 )
