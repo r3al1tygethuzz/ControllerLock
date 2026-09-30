@@ -47,7 +47,7 @@ local Config = {
     CameraMode = "Third Person",
 
     -- 3P offset now starts at 23.5
-    AimOffset = 9.5,
+    AimOffset = 23.5,
 
     -- Distance where the 3P Offset value is exact.
     ReferenceDistance = 40,
@@ -60,9 +60,9 @@ local Config = {
     ThirdPersonMinOffset = 0,
     ThirdPersonMaxOffset = 100,
 
-    Smoothing = 3,
+    Smoothing = 0,
 
-    Prediction = 0.02,
+    Prediction = 0.08,
 
     MaxTargetDistance = 500,
 
@@ -77,7 +77,7 @@ local Config = {
     ESPEnabled = false,
     ESPShowName = true,
     ESPShowOutline = true,
-    ESPWhitelistCheck = false,
+    ESPWhitelistCheck = true,
 
     -- Aimbot whitelist protection
     AimbotWhitelistSkip = true,
@@ -223,7 +223,7 @@ local ScreenGui = Instance.new("ScreenGui")
 ScreenGui.Name = "Xenon"
 ScreenGui.ResetOnSpawn = false
 ScreenGui.IgnoreGuiInset = false
-ScreenGui.ZIndexBehavior = Enum.ZIndexBehavior.Global
+ScreenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
 
 -- Keep XENON above other PlayerGui interfaces while it is open.
 -- Closing the UI still hides the XENON interface normally.
@@ -256,7 +256,7 @@ MainFrame.Position = UDim2.fromScale(0.5, 0.5)
 MainFrame.BackgroundColor3 = BLACK
 MainFrame.BorderSizePixel = 0
 MainFrame.Visible = true
-MainFrame.ZIndex = 100000
+MainFrame.ZIndex = 1
 MainFrame.Parent = ScreenGui
 
 local MainCorner = Instance.new("UICorner")
