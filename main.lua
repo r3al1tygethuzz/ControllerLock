@@ -382,7 +382,7 @@ ScreenGui.IgnoreGuiInset = false
 ScreenGui.Enabled = true
 -- Sibling ordering is safer here: descendants are not accidentally
 -- hidden behind their own parent when another UI is present.
-ScreenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+ScreenGui.ZIndexBehavior = Enum.ZIndexBehavior.Global
 ScreenGui.DisplayOrder = 1000000
 ScreenGui.Parent = PlayerGui
 
@@ -3121,6 +3121,34 @@ RefreshWhitelistUI()
 task.defer(function()
     UpdateAllESP()
 end)
+
+--==============================================================
+-- UI Z-ORDER SAFETY
+--==============================================================
+-- Use Global ZIndex and give every descendant a layer above its parent.
+-- This prevents the black MainFrame from covering its own controls.
+local function RepairXenonZIndex()
+    MainFrame.ZIndex = 1
+
+    for _, Object in ipairs(MainFrame:GetDescendants()) do
+        if Object:IsA("GuiObject") then
+            local Depth = 1
+            local Parent = Object.Parent
+
+            while Parent and Parent ~= MainFrame do
+                Depth += 1
+                Parent = Parent.Parent
+            end
+
+            Object.ZIndex = 100 + (Depth * 10)
+        end
+    end
+
+    -- Keep the floating reopen button above the window.
+    FloatingToggle.ZIndex = 1000000
+end
+
+RepairXenonZIndex()
 
 --==============================================================
 -- CLEANUP
