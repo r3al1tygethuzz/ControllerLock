@@ -223,7 +223,7 @@ local ScreenGui = Instance.new("ScreenGui")
 ScreenGui.Name = "Xenon"
 ScreenGui.ResetOnSpawn = false
 ScreenGui.IgnoreGuiInset = false
-ScreenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+ScreenGui.ZIndexBehavior = Enum.ZIndexBehavior.Global
 
 -- Keep XENON above other PlayerGui interfaces while it is open.
 -- Closing the UI still hides the XENON interface normally.
@@ -256,7 +256,7 @@ MainFrame.Position = UDim2.fromScale(0.5, 0.5)
 MainFrame.BackgroundColor3 = BLACK
 MainFrame.BorderSizePixel = 0
 MainFrame.Visible = true
-MainFrame.ZIndex = 1
+MainFrame.ZIndex = 100
 MainFrame.Parent = ScreenGui
 
 local MainCorner = Instance.new("UICorner")
@@ -277,7 +277,7 @@ TopBar.Name = "TopBar"
 TopBar.BackgroundColor3 = DARK
 TopBar.BorderSizePixel = 0
 TopBar.Size = UDim2.new(1, 0, 0, 58)
-TopBar.ZIndex = 11
+TopBar.ZIndex = 111
 TopBar.Parent = MainFrame
 
 local TopCorner = Instance.new("UICorner")
@@ -289,7 +289,7 @@ TopBottom.BackgroundColor3 = DARK
 TopBottom.BorderSizePixel = 0
 TopBottom.Position = UDim2.new(0, 0, 1, -14)
 TopBottom.Size = UDim2.new(1, 0, 0, 14)
-TopBottom.ZIndex = 11
+TopBottom.ZIndex = 111
 TopBottom.Parent = TopBar
 
 --==============================================================
@@ -305,7 +305,7 @@ Title.Text = "XENON"
 Title.TextColor3 = WHITE
 Title.TextSize = 21
 Title.TextXAlignment = Enum.TextXAlignment.Left
-Title.ZIndex = 12
+Title.ZIndex = 112
 Title.Parent = TopBar
 
 local Subtitle = Instance.new("TextLabel")
@@ -317,7 +317,7 @@ Subtitle.Text = "CONTROLLER CAMERA LOCK"
 Subtitle.TextColor3 = GRAY
 Subtitle.TextSize = 9
 Subtitle.TextXAlignment = Enum.TextXAlignment.Left
-Subtitle.ZIndex = 12
+Subtitle.ZIndex = 112
 Subtitle.Parent = TopBar
 
 --==============================================================
@@ -335,7 +335,7 @@ CloseButton.TextColor3 = WHITE
 CloseButton.TextSize = 24
 CloseButton.Font = Enum.Font.GothamBold
 CloseButton.AutoButtonColor = false
-CloseButton.ZIndex = 20
+CloseButton.ZIndex = 120
 CloseButton.Parent = TopBar
 
 local CloseCorner = Instance.new("UICorner")
@@ -356,7 +356,7 @@ Scroll.CanvasSize = UDim2.fromOffset(0, 1200)
 Scroll.ScrollBarThickness = 3
 Scroll.ScrollBarImageColor3 = RED
 Scroll.ScrollingDirection = Enum.ScrollingDirection.Y
-Scroll.ZIndex = 11
+Scroll.ZIndex = 111
 Scroll.Parent = MainFrame
 
 local function ConfigureTabContainer(Container, Name)
@@ -369,7 +369,7 @@ local function ConfigureTabContainer(Container, Name)
     Container.ScrollBarThickness = 3
     Container.ScrollBarImageColor3 = RED
     Container.ScrollingDirection = Enum.ScrollingDirection.Y
-    Container.ZIndex = 11
+    Container.ZIndex = 111
     Container.Visible = false
     Container.Parent = MainFrame
 
@@ -412,7 +412,7 @@ TabBar.BackgroundColor3 = DARK
 TabBar.BorderSizePixel = 0
 TabBar.Position = UDim2.new(0, 10, 0, 66)
 TabBar.Size = UDim2.new(1, -20, 0, 38)
-TabBar.ZIndex = 20
+TabBar.ZIndex = 120
 TabBar.Parent = MainFrame
 
 local TabBarCorner = Instance.new("UICorner")
@@ -449,7 +449,7 @@ local function CreateTab(Name, Order)
     Button.TextSize = 11
     Button.Font = Enum.Font.GothamSemibold
     Button.AutoButtonColor = false
-    Button.ZIndex = 22
+    Button.ZIndex = 122
     Button.Parent = TabBar
 
     local Indicator = Instance.new("Frame")
@@ -460,7 +460,7 @@ local function CreateTab(Name, Order)
     Indicator.BackgroundColor3 = RED
     Indicator.BorderSizePixel = 0
     Indicator.Visible = false
-    Indicator.ZIndex = 23
+    Indicator.ZIndex = 123
     Indicator.Parent = Button
 
     TabButtons[Name] = Button
@@ -679,7 +679,7 @@ FloatingToggle.TextColor3 = WHITE
 FloatingToggle.TextSize = 18
 FloatingToggle.Font = Enum.Font.GothamBold
 FloatingToggle.AutoButtonColor = false
-FloatingToggle.ZIndex = 100000
+FloatingToggle.ZIndex = 1000000
 FloatingToggle.Parent = ScreenGui
 
 local FloatingCorner = Instance.new("UICorner")
@@ -712,7 +712,7 @@ local function CreateSection(Text)
     Section.TextXAlignment =
         Enum.TextXAlignment.Left
 
-    Section.ZIndex = 12
+    Section.ZIndex = 112
     Section.Parent = CurrentTabContainer
 
     return Section
@@ -731,7 +731,7 @@ local function CreateRow(Height)
     Row.Size =
         UDim2.new(1, 0, 0, Height)
 
-    Row.ZIndex = 12
+    Row.ZIndex = 112
     Row.Parent = CurrentTabContainer
 
     local Corner = Instance.new("UICorner")
@@ -770,7 +770,7 @@ local function CreateLabel(Parent, Text)
     Label.TextXAlignment =
         Enum.TextXAlignment.Left
 
-    Label.ZIndex = 13
+    Label.ZIndex = 113
     Label.Parent = Parent
 
     return Label
@@ -807,7 +807,7 @@ CameraButton.TextColor3 = WHITE
 CameraButton.TextSize = IsMobile and 10 or 12
 CameraButton.Font = Enum.Font.GothamMedium
 CameraButton.AutoButtonColor = false
-CameraButton.ZIndex = 13
+CameraButton.ZIndex = 113
 CameraButton.Parent = CameraRow
 
 local CameraCorner = Instance.new("UICorner")
@@ -828,7 +828,7 @@ CameraOptions.Size =
 
 CameraOptions.BackgroundColor3 = DARKER
 CameraOptions.BorderSizePixel = 0
-CameraOptions.ZIndex = 50
+CameraOptions.ZIndex = 150
 CameraOptions.Parent = CameraRow
 
 local CameraOptionsCorner = Instance.new("UICorner")
@@ -851,7 +851,7 @@ local function CreateCameraOption(Text)
     Option.TextSize = IsMobile and 9 or 11
     Option.Font = Enum.Font.Gotham
     Option.AutoButtonColor = false
-    Option.ZIndex = 51
+    Option.ZIndex = 151
     Option.Parent = CameraOptions
 
     Option.Activated:Connect(function()
@@ -902,7 +902,7 @@ local function CreateInputRow(LabelText, DefaultValue)
     Box.TextSize = IsMobile and 10 or 12
     Box.Font = Enum.Font.GothamMedium
     Box.TextXAlignment = Enum.TextXAlignment.Center
-    Box.ZIndex = 13
+    Box.ZIndex = 113
     Box.Parent = Row
 
     local Corner = Instance.new("UICorner")
@@ -1020,7 +1020,7 @@ local function CreateToggleRow(
     Button.TextSize = IsMobile and 10 or 11
     Button.Font = Enum.Font.GothamBold
     Button.AutoButtonColor = false
-    Button.ZIndex = 13
+    Button.ZIndex = 113
     Button.Parent = Row
 
     local Corner = Instance.new("UICorner")
@@ -1204,7 +1204,7 @@ LockButtonDisplay.TextSize = IsMobile and 8 or 10
 LockButtonDisplay.Font =
     Enum.Font.GothamBold
 
-LockButtonDisplay.ZIndex = 13
+LockButtonDisplay.ZIndex = 113
 LockButtonDisplay.Parent = LockRow
 
 local LockCorner = Instance.new("UICorner")
@@ -1228,7 +1228,7 @@ RebindButton.TextColor3 = WHITE
 RebindButton.TextSize = IsMobile and 10 or 12
 RebindButton.Font = Enum.Font.GothamBold
 RebindButton.AutoButtonColor = false
-RebindButton.ZIndex = 13
+RebindButton.ZIndex = 113
 RebindButton.Parent = RebindRow
 
 local RebindCorner = Instance.new("UICorner")
@@ -1327,7 +1327,7 @@ WhitelistInfo.TextXAlignment =
 WhitelistInfo.TextYAlignment =
     Enum.TextYAlignment.Center
 
-WhitelistInfo.ZIndex = 13
+WhitelistInfo.ZIndex = 113
 WhitelistInfo.Parent = WhitelistInfoRow
 
 local WhitelistContainer = Instance.new("Frame")
@@ -1339,7 +1339,7 @@ WhitelistContainer.BackgroundTransparency = 1
 WhitelistContainer.Size =
     UDim2.new(1, 0, 0, 10)
 
-WhitelistContainer.ZIndex = 12
+WhitelistContainer.ZIndex = 112
 WhitelistContainer.Parent = CurrentTabContainer
 
 local WhitelistLayout = Instance.new("UIListLayout")
@@ -1379,7 +1379,7 @@ StatusLabel.TextSize = IsMobile and 12 or 14
 StatusLabel.TextXAlignment =
     Enum.TextXAlignment.Left
 
-StatusLabel.ZIndex = 13
+StatusLabel.ZIndex = 113
 StatusLabel.Parent = StatusRow
 
 local TargetLabel = Instance.new("TextLabel")
@@ -1402,7 +1402,7 @@ TargetLabel.TextSize = IsMobile and 9 or 10
 TargetLabel.TextXAlignment =
     Enum.TextXAlignment.Left
 
-TargetLabel.ZIndex = 13
+TargetLabel.ZIndex = 113
 TargetLabel.Parent = StatusRow
 
 --==============================================================
@@ -1452,7 +1452,7 @@ local function CreateWhitelistEntry(Player)
         Enum.TextXAlignment.Left
 
     Entry.AutoButtonColor = false
-    Entry.ZIndex = 13
+    Entry.ZIndex = 113
     Entry.Parent = WhitelistContainer
 
     local Padding = Instance.new("UIPadding")
