@@ -47,7 +47,7 @@ local Config = {
     CameraMode = "Third Person",
 
     -- 3P offset now starts at 23.5
-    AimOffset = 23.5,
+    AimOffset = 9.5,
 
     -- Distance where the 3P Offset value is exact.
     ReferenceDistance = 40,
@@ -60,9 +60,9 @@ local Config = {
     ThirdPersonMinOffset = 0,
     ThirdPersonMaxOffset = 100,
 
-    Smoothing = 0,
+    Smoothing = 3,
 
-    Prediction = 0.08,
+    Prediction = 0.02,
 
     MaxTargetDistance = 500,
 
@@ -71,13 +71,13 @@ local Config = {
     -- Lock safety checks
     WallCheck = true,
     KnockedCheck = true,
-    UnlockHealth = 10,
+    UnlockHealth = 5,
 
     -- ESP
     ESPEnabled = false,
     ESPShowName = true,
     ESPShowOutline = true,
-    ESPWhitelistCheck = true,
+    ESPWhitelistCheck = false,
 
     -- Aimbot whitelist protection
     AimbotWhitelistSkip = true,
