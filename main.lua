@@ -12,10 +12,54 @@ local Players = game:GetService("Players")
 local UserInputService = game:GetService("UserInputService")
 local RunService = game:GetService("RunService")
 local HttpService = game:GetService("HttpService")
+local MarketplaceService = game:GetService("MarketplaceService")
 
 local LocalPlayer = Players.LocalPlayer
 local PlayerGui = LocalPlayer:WaitForChild("PlayerGui")
 local Camera = workspace.CurrentCamera
+
+--==============================================================
+-- SUPPORTED GAMES
+--==============================================================
+-- Add supported PlaceIds here. The game name and icon are fetched
+-- automatically for the Supported tab.
+--
+-- DownCheckPath is intentionally only defined for games that actually
+-- support the automatic Downed check. Future supported games can leave
+-- it nil and use the manual health check instead.
+
+local SupportedGames = {
+    [13388465281] = {
+        DownCheckPath = {"Backpack", "Stats", "Downed"},
+        DownCheckDefault = true,
+        ManualHealthDefault = false,
+        ManualHealthDefaultValue = 10,
+    },
+}
+
+local CurrentPlaceId = tonumber(game.PlaceId) or 0
+local ActiveGameConfig = SupportedGames[CurrentPlaceId]
+
+if not ActiveGameConfig then
+    pcall(function()
+        LocalPlayer:Kick("Game Not Supported")
+    end)
+    return
+end
+
+local function GetGameInfo(PlaceId)
+    local Success, Info = pcall(function()
+        return MarketplaceService:GetProductInfo(PlaceId)
+    end)
+
+    if Success and type(Info) == "table" then
+        return Info.Name or ("Place " .. tostring(PlaceId))
+    end
+
+    return "Place " .. tostring(PlaceId)
+end
+
+local CurrentGameName = GetGameInfo(CurrentPlaceId)
 
 --==============================================================
 -- DUPLICATE EXECUTION CLEANUP
@@ -70,8 +114,9 @@ local Config = {
 
     -- Lock safety checks
     WallCheck = true,
-    KnockedCheck = true,
-    UnlockHealth = 10,
+    DownCheck = ActiveGameConfig.DownCheckDefault == true,
+    ManualHealthCheck = ActiveGameConfig.ManualHealthDefault == true,
+    HealthThreshold = tonumber(ActiveGameConfig.ManualHealthDefaultValue) or 10,
 
     -- ESP
     ESPEnabled = false,
@@ -171,6 +216,12 @@ local function LoadSettings()
 end
 
 LoadSettings()
+
+-- Never carry the automatic Downed mode from another game.
+-- Only a supported game that explicitly defines DownCheckPath may use it.
+if not ActiveGameConfig.DownCheckPath then
+    Config.DownCheck = false
+end
 
 --==============================================================
 -- STATE
@@ -479,6 +530,7 @@ end
 
 local VisualsTab = Instance.new("ScrollingFrame")
 local WhitelistTab = Instance.new("ScrollingFrame")
+local SupportedTab = Instance.new("ScrollingFrame")
 
 local AimLayout = Instance.new("UIListLayout")
 AimLayout.Padding = UDim.new(0, 8)
@@ -494,6 +546,7 @@ AimPadding.Parent = Scroll
 
 local VisualsLayout = ConfigureTabContainer(VisualsTab, "TabVisuals")
 local WhitelistLayout = ConfigureTabContainer(WhitelistTab, "TabWhitelist")
+local SupportedLayout = ConfigureTabContainer(SupportedTab, "TabSupported")
 
 local TabBar = Instance.new("Frame")
 TabBar.Name = "TabBar"
@@ -532,7 +585,7 @@ local function CreateTab(Name, Order)
     Button.LayoutOrder = Order
     Button.BackgroundTransparency = 1
     Button.BorderSizePixel = 0
-    Button.Size = UDim2.new(1/3, -3, 1, 0)
+    Button.Size = UDim2.new(1/4, -3, 1, 0)
     Button.Text = Name
     Button.TextColor3 = GRAY
     Button.TextSize = 11
@@ -561,6 +614,7 @@ end
 local AimTabButton = CreateTab("AIM", 1)
 local VisualsTabButton = CreateTab("VISUALS", 2)
 local WhitelistTabButton = CreateTab("WHITELIST", 3)
+local SupportedTabButton = CreateTab("SUPPORTED", 4)
 
 local function UpdateTabCanvas(Container, Layout)
     Container.CanvasSize = UDim2.fromOffset(0, Layout.AbsoluteContentSize.Y + 25)
@@ -571,12 +625,14 @@ local function SetActiveTab(Name)
         AIM = Scroll,
         VISUALS = VisualsTab,
         WHITELIST = WhitelistTab,
+        SUPPORTED = SupportedTab,
     }
 
     local Layouts = {
         AIM = AimLayout,
         VISUALS = VisualsLayout,
         WHITELIST = WhitelistLayout,
+        SUPPORTED = SupportedLayout,
     }
 
     local Container = Containers[Name]
@@ -601,6 +657,7 @@ end
 AimTabButton.Activated:Connect(function() SetActiveTab("AIM") end)
 VisualsTabButton.Activated:Connect(function() SetActiveTab("VISUALS") end)
 WhitelistTabButton.Activated:Connect(function() SetActiveTab("WHITELIST") end)
+SupportedTabButton.Activated:Connect(function() SetActiveTab("SUPPORTED") end)
 
 SetActiveTab("AIM")
 
@@ -1209,36 +1266,48 @@ local WallCheckRow, WallCheckButton =
         end
     )
 
-local KnockedRow, KnockedButton =
+local DownRow, DownButton =
     CreateToggleRow(
-        "Knocked Check",
+        "Down Check",
 
         function()
-            return Config.KnockedCheck
+            return Config.DownCheck and ActiveGameConfig.DownCheckPath ~= nil
         end,
 
         function(Value)
-            Config.KnockedCheck = Value
-            SaveSettings()
-
-            -- If the current target is already below the unlock
-            -- threshold, immediately release the lock when enabled.
-            if Value and LockedTarget then
-                local Character = LockedTarget.Character
-                local Humanoid = Character and Character:FindFirstChildOfClass("Humanoid")
-
-                if Humanoid and Humanoid.Health <= Config.UnlockHealth then
-                    Locked = false
-                    LockedTarget = nil
+            if ActiveGameConfig.DownCheckPath then
+                Config.DownCheck = Value
+                if Value then
+                    Config.ManualHealthCheck = false
                 end
+            else
+                Config.DownCheck = false
             end
+            SaveSettings()
+        end
+    )
+
+local ManualHealthRow, ManualHealthButton =
+    CreateToggleRow(
+        "Manual Health",
+
+        function()
+            return Config.ManualHealthCheck
+        end,
+
+        function(Value)
+            Config.ManualHealthCheck = Value
+            if Value then
+                Config.DownCheck = false
+            end
+            SaveSettings()
         end
     )
 
 local HealthRow, HealthBox =
     CreateInputRow(
-        "Unlock Health",
-        Config.UnlockHealth
+        "Health Threshold",
+        Config.HealthThreshold
     )
 
 HealthBox.FocusLost:Connect(function()
@@ -1246,27 +1315,14 @@ HealthBox.FocusLost:Connect(function()
 
     if Number then
         Number = math.max(0, Number)
-        Config.UnlockHealth = Number
+        Config.HealthThreshold = Number
         SaveSettings()
         HealthBox.Text = tostring(Number)
-
-        -- If the new threshold makes the current target invalid,
-        -- unlock immediately instead of waiting for the next frame.
-        if LockedTarget and Config.KnockedCheck then
-            local Character = LockedTarget.Character
-            local Humanoid = Character and Character:FindFirstChildOfClass("Humanoid")
-
-            if Humanoid and Humanoid.Health <= Config.UnlockHealth then
-                Locked = false
-                LockedTarget = nil
-            end
-        end
     else
-        HealthBox.Text = tostring(Config.UnlockHealth)
+        HealthBox.Text = tostring(Config.HealthThreshold)
     end
 end)
 
---==============================================================
 -- CONTROLLER
 --==============================================================
 
@@ -1453,6 +1509,90 @@ WhitelistLayout.SortOrder =
 
 WhitelistLayout.Parent =
     WhitelistContainer
+
+--==============================================================
+-- SUPPORTED
+--==============================================================
+
+SetActiveTab("SUPPORTED")
+CreateSection("SUPPORTED GAMES")
+
+local function CreateSupportedGameCard(PlaceId, GameConfig)
+    local Name = GetGameInfo(PlaceId)
+
+    local Row = CreateRow(72)
+
+    local Icon = Instance.new("ImageLabel")
+    Icon.BackgroundColor3 = DARKER
+    Icon.BorderSizePixel = 0
+    Icon.Position = UDim2.new(0, 10, 0.5, -25)
+    Icon.Size = UDim2.fromOffset(50, 50)
+    Icon.Image = "rbxthumb://type=Game&id=" .. tostring(PlaceId) .. "&w=150&h=150"
+    Icon.ScaleType = Enum.ScaleType.Crop
+    Icon.ZIndex = 13
+    Icon.Parent = Row
+
+    local IconCorner = Instance.new("UICorner")
+    IconCorner.CornerRadius = UDim.new(0, 8)
+    IconCorner.Parent = Icon
+
+    local NameLabel = Instance.new("TextLabel")
+    NameLabel.BackgroundTransparency = 1
+    NameLabel.Position = UDim2.new(0, 72, 0, 9)
+    NameLabel.Size = UDim2.new(1, -82, 0, 24)
+    NameLabel.Font = Enum.Font.GothamBold
+    NameLabel.Text = Name
+    NameLabel.TextColor3 = WHITE
+    NameLabel.TextSize = IsMobile and 11 or 13
+    NameLabel.TextXAlignment = Enum.TextXAlignment.Left
+    NameLabel.TextTruncate = Enum.TextTruncate.AtEnd
+    NameLabel.ZIndex = 13
+    NameLabel.Parent = Row
+
+    local SupportLabel = Instance.new("TextLabel")
+    SupportLabel.BackgroundTransparency = 1
+    SupportLabel.Position = UDim2.new(0, 72, 0, 35)
+    SupportLabel.Size = UDim2.new(1, -82, 0, 22)
+    SupportLabel.Font = Enum.Font.Gotham
+    SupportLabel.Text = GameConfig.DownCheckPath and "DOWN CHECK SUPPORTED" or "MANUAL HEALTH CHECK"
+    SupportLabel.TextColor3 = GameConfig.DownCheckPath and RED or GRAY
+    SupportLabel.TextSize = 9
+    SupportLabel.TextXAlignment = Enum.TextXAlignment.Left
+    SupportLabel.ZIndex = 13
+    SupportLabel.Parent = Row
+
+    return Row
+end
+
+local CurrentGameRow = CreateRow(54)
+local CurrentGameLabel = Instance.new("TextLabel")
+CurrentGameLabel.BackgroundTransparency = 1
+CurrentGameLabel.Position = UDim2.new(0, 12, 0, 6)
+CurrentGameLabel.Size = UDim2.new(1, -24, 0, 20)
+CurrentGameLabel.Font = Enum.Font.GothamBold
+CurrentGameLabel.Text = "CURRENT: " .. CurrentGameName
+CurrentGameLabel.TextColor3 = WHITE
+CurrentGameLabel.TextSize = IsMobile and 10 or 12
+CurrentGameLabel.TextXAlignment = Enum.TextXAlignment.Left
+CurrentGameLabel.TextTruncate = Enum.TextTruncate.AtEnd
+CurrentGameLabel.ZIndex = 13
+CurrentGameLabel.Parent = CurrentGameRow
+
+local CurrentStatusLabel = Instance.new("TextLabel")
+CurrentStatusLabel.BackgroundTransparency = 1
+CurrentStatusLabel.Position = UDim2.new(0, 12, 0, 27)
+CurrentStatusLabel.Size = UDim2.new(1, -24, 0, 18)
+CurrentStatusLabel.Font = Enum.Font.Gotham
+CurrentStatusLabel.Text = "SUPPORTED"
+CurrentStatusLabel.TextColor3 = RED
+CurrentStatusLabel.TextSize = 9
+CurrentStatusLabel.TextXAlignment = Enum.TextXAlignment.Left
+CurrentStatusLabel.ZIndex = 13
+CurrentStatusLabel.Parent = CurrentGameRow
+
+for PlaceId, GameConfig in pairs(SupportedGames) do
+    CreateSupportedGameCard(PlaceId, GameConfig)
+end
 
 --==============================================================
 -- STATUS
@@ -1942,22 +2082,77 @@ end
 -- LOCK SAFETY CHECKS
 --==============================================================
 
-local function IsTargetBelowUnlockHealth(Player)
+-- Game path: Player.Backpack.Stats.Downed
+-- Matching is case-insensitive for Backpack/BackPack, Stats/stats,
+-- and Downed/DOWNED.
+
+local function FindChildCaseInsensitive(Parent, WantedName)
+    if not Parent then
+        return nil
+    end
+
+    local Wanted = string.lower(WantedName)
+
+    for _, Child in ipairs(Parent:GetChildren()) do
+        if string.lower(Child.Name) == Wanted then
+            return Child
+        end
+    end
+
+    return nil
+end
+
+local function GetPathValueCaseInsensitive(Root, Path)
+    local Current = Root
+
+    for _, Name in ipairs(Path or {}) do
+        Current = FindChildCaseInsensitive(Current, Name)
+        if not Current then
+            return nil
+        end
+    end
+
+    return Current
+end
+
+local function IsTargetDown(Player)
+    if not Player or not ActiveGameConfig.DownCheckPath then
+        return false
+    end
+
+    local ValueObject =
+        GetPathValueCaseInsensitive(
+            Player,
+            ActiveGameConfig.DownCheckPath
+        )
+
+    if not ValueObject then
+        return false
+    end
+
+    local Success, Value = pcall(function()
+        return ValueObject.Value
+    end)
+
+    return Success and Value == true
+end
+
+local function IsTargetBelowHealth(Player)
     if not Player then
-        return true
+        return false
     end
 
     local Character = Player.Character
     if not Character then
-        return true
+        return false
     end
 
     local Humanoid = Character:FindFirstChildOfClass("Humanoid")
     if not Humanoid then
-        return true
+        return false
     end
 
-    return Humanoid.Health <= Config.UnlockHealth
+    return Humanoid.Health <= Config.HealthThreshold
 end
 
 local function IsHeadVisible(Player)
@@ -2001,8 +2196,6 @@ local function IsHeadVisible(Player)
         return true
     end
 
-    -- Any hit belonging to the target means there is no wall between
-    -- the camera and the target's head. Otherwise something is blocking it.
     return Result.Instance:IsDescendantOf(Character)
 end
 
@@ -2011,7 +2204,14 @@ local function IsTargetLockable(Player)
         return false
     end
 
-    if Config.KnockedCheck and IsTargetBelowUnlockHealth(Player) then
+    if Config.DownCheck
+        and ActiveGameConfig.DownCheckPath
+        and IsTargetDown(Player) then
+        return false
+    end
+
+    if Config.ManualHealthCheck
+        and IsTargetBelowHealth(Player) then
         return false
     end
 
@@ -2023,7 +2223,6 @@ local function IsTargetLockable(Player)
 end
 
 
---==============================================================
 -- CONTROLLER DOT TARGET
 --==============================================================
 
@@ -2510,21 +2709,8 @@ local function IsTargetValid(Player)
         return false
     end
 
-    -- WallCheck is deliberately evaluated every render frame so a target
-    -- can immediately unlock when they move behind cover.
-    if Config.KnockedCheck
-        and IsTargetBelowUnlockHealth(Player) then
-
-        return false
-    end
-
-    if Config.WallCheck
-        and not IsHeadVisible(Player) then
-
-        return false
-    end
-
-    return true
+    -- Revalidate the active target against the same down/wall checks.
+    return IsTargetLockable(Player)
 end
 
 --==============================================================
@@ -2875,6 +3061,12 @@ WhitelistLayout:GetPropertyChangedSignal(
     "AbsoluteContentSize"
 ):Connect(function()
     UpdateTabCanvas(WhitelistTab, WhitelistLayout)
+end)
+
+SupportedLayout:GetPropertyChangedSignal(
+    "AbsoluteContentSize"
+):Connect(function()
+    UpdateTabCanvas(SupportedTab, SupportedLayout)
 end)
 
 WhitelistLayout:GetPropertyChangedSignal(
