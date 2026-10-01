@@ -35,14 +35,31 @@ local SupportedGames = {
         ManualHealthDefault = false,
         ManualHealthDefaultValue = 10,
     },
+
+    [13083893317] = {
+        DownCheckPath = {"Backpack", "Stats", "Downed"},
+        DownCheckDefault = false,
+        ManualHealthDefault = true,
+        ManualHealthDefaultValue = 5,
+    },
 }
 
 local CurrentPlaceId = tonumber(game.PlaceId) or 0
-local ActiveGameConfig = SupportedGames[CurrentPlaceId]
+local CurrentGameId = tonumber(game.GameId) or 0
+
+-- Accept either a PlaceId or a Universe/GameId.
+local ActiveGameConfig =
+    SupportedGames[CurrentPlaceId]
+    or SupportedGames[CurrentGameId]
 
 if not ActiveGameConfig then
     pcall(function()
-        LocalPlayer:Kick("Game Not Supported")
+        LocalPlayer:Kick(
+            "Xenon: Game Not Supported | PlaceId="
+            .. tostring(CurrentPlaceId)
+            .. " GameId="
+            .. tostring(CurrentGameId)
+        )
     end)
     return
 end
@@ -126,6 +143,17 @@ local Config = {
 
     -- Aimbot whitelist protection
     AimbotWhitelistSkip = true,
+
+    --==========================================================
+    -- SILENT AIM
+    --==========================================================
+    SilentEnabled = false,
+    SilentHitChance = 100,
+    SilentTargetPart = "Head",
+    SilentWallCheck = true,
+    SilentWhitelistSkip = true,
+    SilentDownCheck = true,
+    SilentMethod = "Raycast",
 }
 
 --==============================================================
@@ -238,6 +266,11 @@ local Connections = {}
 local ESPObjects = {}
 
 local Whitelist = {}
+
+local SilentTarget = nil
+local SilentHookInstalled = false
+local SilentOldNamecall = nil
+local SilentOldIndex = nil
 
 --==============================================================
 -- WHITELIST STORAGE
@@ -546,6 +579,7 @@ local function ConfigureTabContainer(Container, Name)
     return Layout
 end
 
+local SilentTab = Instance.new("ScrollingFrame")
 local VisualsTab = Instance.new("ScrollingFrame")
 local WhitelistTab = Instance.new("ScrollingFrame")
 local SupportedTab = Instance.new("ScrollingFrame")
@@ -562,6 +596,7 @@ AimPadding.PaddingTop = UDim.new(0, 3)
 AimPadding.PaddingBottom = UDim.new(0, 12)
 AimPadding.Parent = Scroll
 
+local SilentLayout = ConfigureTabContainer(SilentTab, "TabSilent")
 local VisualsLayout = ConfigureTabContainer(VisualsTab, "TabVisuals")
 local WhitelistLayout = ConfigureTabContainer(WhitelistTab, "TabWhitelist")
 local SupportedLayout = ConfigureTabContainer(SupportedTab, "TabSupported")
@@ -603,7 +638,7 @@ local function CreateTab(Name, Order)
     Button.LayoutOrder = Order
     Button.BackgroundTransparency = 1
     Button.BorderSizePixel = 0
-    Button.Size = UDim2.new(1/4, -3, 1, 0)
+    Button.Size = UDim2.new(1/5, -3, 1, 0)
     Button.Text = Name
     Button.TextColor3 = GRAY
     Button.TextSize = 11
@@ -630,9 +665,10 @@ local function CreateTab(Name, Order)
 end
 
 local AimTabButton = CreateTab("AIM", 1)
-local VisualsTabButton = CreateTab("VISUALS", 2)
-local WhitelistTabButton = CreateTab("WHITELIST", 3)
-local SupportedTabButton = CreateTab("SUPPORTED", 4)
+local SilentTabButton = CreateTab("SILENT", 2)
+local VisualsTabButton = CreateTab("VISUALS", 3)
+local WhitelistTabButton = CreateTab("WHITELIST", 4)
+local SupportedTabButton = CreateTab("SUPPORTED", 5)
 
 local function UpdateTabCanvas(Container, Layout)
     Container.CanvasSize = UDim2.fromOffset(0, Layout.AbsoluteContentSize.Y + 25)
@@ -641,6 +677,7 @@ end
 local function SetActiveTab(Name)
     local Containers = {
         AIM = Scroll,
+        SILENT = SilentTab,
         VISUALS = VisualsTab,
         WHITELIST = WhitelistTab,
         SUPPORTED = SupportedTab,
@@ -648,6 +685,7 @@ local function SetActiveTab(Name)
 
     local Layouts = {
         AIM = AimLayout,
+        SILENT = SilentLayout,
         VISUALS = VisualsLayout,
         WHITELIST = WhitelistLayout,
         SUPPORTED = SupportedLayout,
@@ -673,6 +711,7 @@ local function SetActiveTab(Name)
 end
 
 AimTabButton.Activated:Connect(function() SetActiveTab("AIM") end)
+SilentTabButton.Activated:Connect(function() SetActiveTab("SILENT") end)
 VisualsTabButton.Activated:Connect(function() SetActiveTab("VISUALS") end)
 WhitelistTabButton.Activated:Connect(function() SetActiveTab("WHITELIST") end)
 SupportedTabButton.Activated:Connect(function() SetActiveTab("SUPPORTED") end)
@@ -719,6 +758,8 @@ local function UpdateResponsiveState()
             UDim2.new(0, 8, 0, 99)
         Scroll.Size =
             UDim2.new(1, -16, 1, -107)
+        SilentTab.Position = Scroll.Position
+        SilentTab.Size = Scroll.Size
         VisualsTab.Position = Scroll.Position
         VisualsTab.Size = Scroll.Size
         WhitelistTab.Position = Scroll.Position
@@ -765,6 +806,8 @@ local function UpdateResponsiveState()
             UDim2.new(0, 9, 0, 104)
         Scroll.Size =
             UDim2.new(1, -18, 1, -112)
+        SilentTab.Position = Scroll.Position
+        SilentTab.Size = Scroll.Size
         VisualsTab.Position = Scroll.Position
         VisualsTab.Size = Scroll.Size
         WhitelistTab.Position = Scroll.Position
@@ -804,6 +847,8 @@ local function UpdateResponsiveState()
             UDim2.new(0, 10, 0, 108)
         Scroll.Size =
             UDim2.new(1, -20, 1, -118)
+        SilentTab.Position = Scroll.Position
+        SilentTab.Size = Scroll.Size
         VisualsTab.Position = Scroll.Position
         VisualsTab.Size = Scroll.Size
         WhitelistTab.Position = Scroll.Position
@@ -1412,6 +1457,574 @@ RebindButton.Parent = RebindRow
 local RebindCorner = Instance.new("UICorner")
 RebindCorner.CornerRadius = UDim.new(0, 7)
 RebindCorner.Parent = RebindButton
+
+
+--==============================================================
+-- SILENT AIM CORE
+--==============================================================
+-- Silent aim is intentionally best-effort because Roblox games use
+-- different remote argument layouts. The selected method controls
+-- which common ray/target representation is attempted.
+--
+-- The existing camera lock is untouched.
+
+local function SilentIsWhitelisted(Player)
+    return Player and Whitelist[Player.UserId] == true
+end
+
+local function SilentIsDowned(Player)
+    if not Player or not Config.SilentDownCheck then
+        return false
+    end
+
+    local Path = ActiveGameConfig and ActiveGameConfig.DownCheckPath
+    if not Path then
+        return false
+    end
+
+    local Object = Player
+    for _, Name in ipairs(Path) do
+        Object = Object and Object:FindFirstChild(Name)
+    end
+
+    return Object ~= nil and Object.Value == true
+end
+
+local function SilentGetPart(Player)
+    local Character = Player and Player.Character
+    if not Character then
+        return nil
+    end
+
+    local Requested = Config.SilentTargetPart
+
+    if Requested == "Head" then
+        return Character:FindFirstChild("Head")
+            or Character:FindFirstChild("UpperTorso")
+            or Character:FindFirstChild("HumanoidRootPart")
+    elseif Requested == "Torso" then
+        return Character:FindFirstChild("UpperTorso")
+            or Character:FindFirstChild("Torso")
+            or Character:FindFirstChild("HumanoidRootPart")
+    elseif Requested == "HumanoidRootPart" then
+        return Character:FindFirstChild("HumanoidRootPart")
+            or Character:FindFirstChild("UpperTorso")
+    end
+
+    return Character:FindFirstChild(Requested)
+        or Character:FindFirstChild("Head")
+        or Character:FindFirstChild("HumanoidRootPart")
+end
+
+local function SilentWallCheck(Part)
+    if not Config.SilentWallCheck or not Part then
+        return true
+    end
+
+    local Character = Part:FindFirstAncestorOfClass("Model")
+    local Origin = Camera.CFrame.Position
+    local Direction = Part.Position - Origin
+
+    local Params = RaycastParams.new()
+    Params.FilterType = Enum.RaycastFilterType.Exclude
+    Params.FilterDescendantsInstances = {
+        LocalPlayer.Character,
+        Character,
+    }
+    Params.IgnoreWater = true
+
+    return workspace:Raycast(Origin, Direction, Params) == nil
+end
+
+local function SilentGetTarget()
+    local BestPlayer = nil
+    local BestScore = math.huge
+    local Viewport = Camera.ViewportSize
+    local Center = Vector2.new(Viewport.X * 0.5, Viewport.Y * 0.5)
+
+    for _, Player in ipairs(Players:GetPlayers()) do
+        if Player ~= LocalPlayer
+            and Player.Character
+            and (not Config.SilentWhitelistSkip or not SilentIsWhitelisted(Player))
+            and not SilentIsDowned(Player)
+        then
+            local Part = SilentGetPart(Player)
+
+            if Part and Part:IsA("BasePart") and SilentWallCheck(Part) then
+                local Screen, Visible =
+                    Camera:WorldToViewportPoint(Part.Position)
+
+                if Visible and Screen.Z > 0 then
+                    local Score =
+                        (Vector2.new(Screen.X, Screen.Y) - Center).Magnitude
+
+                    if Score < BestScore then
+                        BestScore = Score
+                        BestPlayer = Player
+                    end
+                end
+            end
+        end
+    end
+
+    return BestPlayer
+end
+
+local function SilentResolveTarget()
+    if not Config.SilentEnabled then
+        SilentTarget = nil
+        return nil
+    end
+
+    if SilentTarget then
+        local Part = SilentGetPart(SilentTarget)
+
+        if Part
+            and not (Config.SilentWhitelistSkip and SilentIsWhitelisted(SilentTarget))
+            and not SilentIsDowned(SilentTarget)
+            and SilentWallCheck(Part)
+        then
+            return Part
+        end
+    end
+
+    SilentTarget = SilentGetTarget()
+
+    return SilentTarget and SilentGetPart(SilentTarget) or nil
+end
+
+local function SilentChancePasses()
+    local Chance = math.clamp(
+        tonumber(Config.SilentHitChance) or 100,
+        0,
+        100
+    )
+
+    return math.random() * 100 <= Chance
+end
+
+local function SilentReplaceArgs(Args, Part, Method)
+    if not Part then
+        return false
+    end
+
+    local Position = Part.Position
+
+    -- ScreenTarget: prefer replacing a BasePart/Vector3 target.
+    if Method == "ScreenTarget" then
+        for Index, Value in ipairs(Args) do
+            if typeof(Value) == "Instance"
+                and Value:IsA("BasePart")
+            then
+                Args[Index] = Part
+                return true
+            end
+        end
+
+        for Index, Value in ipairs(Args) do
+            if typeof(Value) == "Vector3" then
+                Args[Index] = Position
+                return true
+            end
+        end
+    end
+
+    -- Ray / FindPartOnRay: replace a Ray aimed at the old target.
+    if Method == "Ray" or Method == "FindPartOnRay" then
+        for Index, Value in ipairs(Args) do
+            if typeof(Value) == "Ray" then
+                local Origin = Value.Origin
+                Args[Index] = Ray.new(
+                    Origin,
+                    (Position - Origin)
+                )
+                return true
+            end
+        end
+    end
+
+    -- Raycast: replace the common origin/direction pair.
+    if Method == "Raycast" then
+        local OriginIndex
+        local DirectionIndex
+
+        for Index, Value in ipairs(Args) do
+            if typeof(Value) == "Vector3" then
+                if not OriginIndex then
+                    OriginIndex = Index
+                elseif not DirectionIndex then
+                    DirectionIndex = Index
+                    break
+                end
+            end
+        end
+
+        if OriginIndex and DirectionIndex then
+            local Origin = Args[OriginIndex]
+
+            Args[DirectionIndex] =
+                Position - Origin
+
+            return true
+        end
+    end
+
+    -- Mouse: replace the first BasePart/Vector3 target argument.
+    if Method == "Mouse" then
+        for Index, Value in ipairs(Args) do
+            if typeof(Value) == "Instance"
+                and Value:IsA("BasePart")
+            then
+                Args[Index] = Part
+                return true
+            end
+        end
+
+        for Index, Value in ipairs(Args) do
+            if typeof(Value) == "Vector3" then
+                Args[Index] = Position
+                return true
+            end
+        end
+    end
+
+    return false
+end
+
+-- Best-effort executor hook. It only runs when the executor exposes
+-- hookmetamethod/newcclosure. If unavailable, the UI still works and
+-- the resolver remains available through _G.XenonSilentResolveTarget.
+local function InstallSilentHook()
+    if SilentHookInstalled then
+        return
+    end
+
+    if type(hookmetamethod) ~= "function"
+        or type(newcclosure) ~= "function"
+        or type(getnamecallmethod) ~= "function"
+    then
+        return
+    end
+
+    local Success = pcall(function()
+        local OldNamecall
+        OldNamecall = hookmetamethod(
+            game,
+            "__namecall",
+            newcclosure(function(Self, ...)
+                local MethodName = getnamecallmethod()
+
+                local IsRemoteCall =
+                    MethodName == "FireServer"
+                    or MethodName == "InvokeServer"
+
+                if not IsRemoteCall
+                    or not Config.SilentEnabled
+                    or not SilentChancePasses()
+                then
+                    return OldNamecall(Self, ...)
+                end
+
+                local Part = SilentResolveTarget()
+
+                if not Part then
+                    return OldNamecall(Self, ...)
+                end
+
+                local Args = table.pack(...)
+
+                local DidReplace =
+                    SilentReplaceArgs(
+                        Args,
+                        Part,
+                        Config.SilentMethod
+                    )
+
+                if DidReplace then
+                    return OldNamecall(
+                        Self,
+                        table.unpack(
+                            Args,
+                            1,
+                            Args.n
+                        )
+                    )
+                end
+
+                return OldNamecall(Self, ...)
+            end)
+        )
+
+        SilentOldNamecall = OldNamecall
+        SilentHookInstalled = true
+    end)
+
+    if not Success then
+        SilentHookInstalled = false
+    end
+end
+
+task.defer(InstallSilentHook)
+
+_G.XenonSilentResolveTarget = SilentResolveTarget
+
+
+
+--==============================================================
+-- SILENT
+--==============================================================
+
+SetActiveTab("SILENT")
+CreateSection("SILENT AIM")
+
+local SilentEnabledRow, SilentEnabledButton =
+    CreateToggleRow(
+        "Enabled",
+        function()
+            return Config.SilentEnabled
+        end,
+        function(Value)
+            Config.SilentEnabled = Value
+            if not Value then
+                SilentTarget = nil
+            else
+                InstallSilentHook()
+            end
+            SaveSettings()
+        end
+    )
+
+local SilentChanceRow, SilentChanceBox =
+    CreateInputRow(
+        "Hit Chance",
+        Config.SilentHitChance
+    )
+
+SilentChanceBox.FocusLost:Connect(function()
+    local Number = tonumber(SilentChanceBox.Text)
+
+    if Number then
+        Number = math.clamp(Number, 0, 100)
+        Config.SilentHitChance = Number
+        SilentChanceBox.Text = tostring(Number)
+        SaveSettings()
+    else
+        SilentChanceBox.Text = tostring(Config.SilentHitChance)
+    end
+end)
+
+local SilentPartRow = CreateRow(44)
+CreateLabel(SilentPartRow, "Target Part")
+
+local SilentPartButton = Instance.new("TextButton")
+SilentPartButton.AnchorPoint = Vector2.new(1, 0.5)
+SilentPartButton.Position = UDim2.new(1, -8, 0.5, 0)
+SilentPartButton.Size = UDim2.new(0.42, 0, 0, 30)
+SilentPartButton.BackgroundColor3 = DARKER
+SilentPartButton.BorderSizePixel = 0
+SilentPartButton.Text = Config.SilentTargetPart
+SilentPartButton.TextColor3 = WHITE
+SilentPartButton.TextSize = IsMobile and 9 or 11
+SilentPartButton.Font = Enum.Font.GothamMedium
+SilentPartButton.AutoButtonColor = false
+SilentPartButton.ZIndex = 13
+SilentPartButton.Parent = SilentPartRow
+
+local SilentPartCorner = Instance.new("UICorner")
+SilentPartCorner.CornerRadius = UDim.new(0, 6)
+SilentPartCorner.Parent = SilentPartButton
+
+local SilentPartOptions = Instance.new("Frame")
+SilentPartOptions.Visible = false
+SilentPartOptions.AnchorPoint = Vector2.new(1, 0)
+SilentPartOptions.Position = UDim2.new(1, -8, 1, 3)
+SilentPartOptions.Size = UDim2.new(0.42, 0, 0, 93)
+SilentPartOptions.BackgroundColor3 = DARKER
+SilentPartOptions.BorderSizePixel = 0
+SilentPartOptions.ZIndex = 60
+SilentPartOptions.Parent = SilentPartRow
+
+local SilentPartOptionsCorner = Instance.new("UICorner")
+SilentPartOptionsCorner.CornerRadius = UDim.new(0, 6)
+SilentPartOptionsCorner.Parent = SilentPartOptions
+
+local SilentPartLayout = Instance.new("UIListLayout")
+SilentPartLayout.Parent = SilentPartOptions
+
+for _, PartName in ipairs({"Head", "Torso", "HumanoidRootPart"}) do
+    local Option = Instance.new("TextButton")
+    Option.Size = UDim2.new(1, 0, 0, 31)
+    Option.BackgroundTransparency = 1
+    Option.BorderSizePixel = 0
+    Option.Text = PartName
+    Option.TextColor3 = WHITE
+    Option.TextSize = IsMobile and 9 or 11
+    Option.Font = Enum.Font.Gotham
+    Option.AutoButtonColor = false
+    Option.ZIndex = 61
+    Option.Parent = SilentPartOptions
+
+    Option.Activated:Connect(function()
+        Config.SilentTargetPart = PartName
+        SilentPartButton.Text = PartName
+        SilentPartOptions.Visible = false
+        SilentTarget = nil
+        SaveSettings()
+    end)
+end
+
+SilentPartButton.Activated:Connect(function()
+    SilentPartOptions.Visible = not SilentPartOptions.Visible
+end)
+
+local SilentWallRow, SilentWallButton =
+    CreateToggleRow(
+        "Wall Check",
+        function()
+            return Config.SilentWallCheck
+        end,
+        function(Value)
+            Config.SilentWallCheck = Value
+            SaveSettings()
+        end
+    )
+
+local SilentWhitelistRow, SilentWhitelistButton =
+    CreateToggleRow(
+        "Whitelist Skip",
+        function()
+            return Config.SilentWhitelistSkip
+        end,
+        function(Value)
+            Config.SilentWhitelistSkip = Value
+            if Value and SilentTarget and IsWhitelisted(SilentTarget) then
+                SilentTarget = nil
+            end
+            SaveSettings()
+        end
+    )
+
+local SilentDownRow, SilentDownButton =
+    CreateToggleRow(
+        "Down Check",
+        function()
+            return Config.SilentDownCheck
+        end,
+        function(Value)
+            Config.SilentDownCheck = Value
+            if Value and SilentTarget and SilentIsDowned(SilentTarget) then
+                SilentTarget = nil
+            end
+            SaveSettings()
+        end
+    )
+
+local SilentMethodRow = CreateRow(44)
+CreateLabel(SilentMethodRow, "Method")
+
+local SilentMethodButton = Instance.new("TextButton")
+SilentMethodButton.AnchorPoint = Vector2.new(1, 0.5)
+SilentMethodButton.Position = UDim2.new(1, -8, 0.5, 0)
+SilentMethodButton.Size = UDim2.new(0.42, 0, 0, 30)
+SilentMethodButton.BackgroundColor3 = DARKER
+SilentMethodButton.BorderSizePixel = 0
+SilentMethodButton.Text = Config.SilentMethod
+SilentMethodButton.TextColor3 = WHITE
+SilentMethodButton.TextSize = IsMobile and 8 or 10
+SilentMethodButton.Font = Enum.Font.GothamMedium
+SilentMethodButton.AutoButtonColor = false
+SilentMethodButton.ZIndex = 13
+SilentMethodButton.Parent = SilentMethodRow
+
+local SilentMethodCorner = Instance.new("UICorner")
+SilentMethodCorner.CornerRadius = UDim.new(0, 6)
+SilentMethodCorner.Parent = SilentMethodButton
+
+local SilentMethodOptions = Instance.new("Frame")
+SilentMethodOptions.Visible = false
+SilentMethodOptions.AnchorPoint = Vector2.new(1, 0)
+SilentMethodOptions.Position = UDim2.new(1, -8, 1, 3)
+SilentMethodOptions.Size = UDim2.new(0.42, 0, 0, 155)
+SilentMethodOptions.BackgroundColor3 = DARKER
+SilentMethodOptions.BorderSizePixel = 0
+SilentMethodOptions.ZIndex = 60
+SilentMethodOptions.Parent = SilentMethodRow
+
+local SilentMethodOptionsCorner = Instance.new("UICorner")
+SilentMethodOptionsCorner.CornerRadius = UDim.new(0, 6)
+SilentMethodOptionsCorner.Parent = SilentMethodOptions
+
+local SilentMethodLayout = Instance.new("UIListLayout")
+SilentMethodLayout.Parent = SilentMethodOptions
+
+for _, MethodName in ipairs({
+    "Raycast",
+    "FindPartOnRay",
+    "Ray",
+    "Mouse",
+    "ScreenTarget",
+}) do
+    local Option = Instance.new("TextButton")
+    Option.Size = UDim2.new(1, 0, 0, 31)
+    Option.BackgroundTransparency = 1
+    Option.BorderSizePixel = 0
+    Option.Text = MethodName
+    Option.TextColor3 = WHITE
+    Option.TextSize = IsMobile and 8 or 10
+    Option.Font = Enum.Font.Gotham
+    Option.AutoButtonColor = false
+    Option.ZIndex = 61
+    Option.Parent = SilentMethodOptions
+
+    Option.Activated:Connect(function()
+        Config.SilentMethod = MethodName
+        SilentMethodButton.Text = MethodName
+        SilentMethodOptions.Visible = false
+        SaveSettings()
+        InstallSilentHook()
+    end)
+end
+
+SilentMethodButton.Activated:Connect(function()
+    SilentMethodOptions.Visible =
+        not SilentMethodOptions.Visible
+end)
+
+CreateSection("SILENT STATUS")
+
+local SilentStatusRow = CreateRow(55)
+local SilentStatusLabel = Instance.new("TextLabel")
+SilentStatusLabel.BackgroundTransparency = 1
+SilentStatusLabel.Position = UDim2.new(0, 12, 0, 5)
+SilentStatusLabel.Size = UDim2.new(1, -24, 0, 45)
+SilentStatusLabel.Font = Enum.Font.GothamMedium
+SilentStatusLabel.TextSize = IsMobile and 9 or 11
+SilentStatusLabel.TextColor3 = GRAY
+SilentStatusLabel.TextWrapped = true
+SilentStatusLabel.TextXAlignment = Enum.TextXAlignment.Left
+SilentStatusLabel.TextYAlignment = Enum.TextYAlignment.Center
+SilentStatusLabel.ZIndex = 13
+SilentStatusLabel.Parent = SilentStatusRow
+
+task.spawn(function()
+    while SilentStatusLabel and SilentStatusLabel.Parent do
+        if not Config.SilentEnabled then
+            SilentStatusLabel.Text = "Silent Aim: OFF"
+        elseif not SilentHookInstalled then
+            SilentStatusLabel.Text =
+                "Silent Aim: ON | No compatible hook API"
+        elseif SilentTarget then
+            SilentStatusLabel.Text =
+                "Silent Aim: ON | Target: "
+                .. SilentTarget.DisplayName
+        else
+            SilentStatusLabel.Text =
+                "Silent Aim: ON | Searching..."
+        end
+        task.wait(0.25)
+    end
+end)
+
 
 --==============================================================
 -- VISUALS
@@ -3199,3 +3812,6 @@ print("ESP:", Config.ESPEnabled)
 print("Whitelist entries:",
     tostring(#Players:GetPlayers() - 1))
 print("======================================")
+
+-- Silent cleanup
+_G.XenonSilentResolveTarget = nil
