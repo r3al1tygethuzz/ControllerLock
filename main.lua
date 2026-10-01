@@ -35,6 +35,12 @@ local SupportedGames = {
         ManualHealthDefault = false,
         ManualHealthDefaultValue = 10,
     },
+    [13083893317] = {
+        DownCheckPath = {"Backpack", "Stats", "Downed"},
+        DownCheckDefault = false,
+        ManualHealthDefault = true,
+        ManualHealthDefaultValue = 5,
+    },
 }
 
 local CurrentPlaceId = tonumber(game.PlaceId) or 0
