@@ -18,6 +18,125 @@ local LocalPlayer = Players.LocalPlayer
 local PlayerGui = LocalPlayer:WaitForChild("PlayerGui")
 local Camera = workspace.CurrentCamera
 
+
+--==============================================================
+-- XENON STAGED LOADER
+--==============================================================
+-- Six stages, five seconds each (~30 seconds total).  Each stage
+-- updates the small loader instead of creating the whole UI at once.
+-- The loader also prevents duplicate executions from stacking.
+
+local XenonLoadMessages = {
+    "Loading Xenon... Preparing services",
+    "Loading supported-game configuration",
+    "Loading controller and camera systems",
+    "Loading whitelist and ESP systems",
+    "Loading Aim and Silent settings",
+    "Finishing Xenon UI and connections",
+}
+
+local XenonLoaderGui
+local XenonLoaderText
+local XenonLoaderBar
+
+local function CreateXenonLoader()
+    local Gui = Instance.new("ScreenGui")
+    Gui.Name = "XenonLoading"
+    Gui.ResetOnSpawn = false
+    Gui.IgnoreGuiInset = true
+    Gui.DisplayOrder = 2000000
+    Gui.Parent = PlayerGui
+
+    local Frame = Instance.new("Frame")
+    Frame.AnchorPoint = Vector2.new(0.5, 0.5)
+    Frame.Position = UDim2.fromScale(0.5, 0.5)
+    Frame.Size = UDim2.fromOffset(330, 108)
+    Frame.BackgroundColor3 = Color3.fromRGB(8, 8, 8)
+    Frame.BorderSizePixel = 0
+    Frame.Parent = Gui
+
+    local Corner = Instance.new("UICorner")
+    Corner.CornerRadius = UDim.new(0, 12)
+    Corner.Parent = Frame
+
+    local Stroke = Instance.new("UIStroke")
+    Stroke.Color = Color3.fromRGB(220, 40, 40)
+    Stroke.Thickness = 1
+    Stroke.Parent = Frame
+
+    local Title = Instance.new("TextLabel")
+    Title.BackgroundTransparency = 1
+    Title.Position = UDim2.fromOffset(14, 10)
+    Title.Size = UDim2.new(1, -28, 0, 24)
+    Title.Font = Enum.Font.GothamBold
+    Title.Text = "XENON"
+    Title.TextColor3 = Color3.fromRGB(245, 245, 245)
+    Title.TextSize = 17
+    Title.TextXAlignment = Enum.TextXAlignment.Left
+    Title.Parent = Frame
+
+    XenonLoaderText = Instance.new("TextLabel")
+    XenonLoaderText.BackgroundTransparency = 1
+    XenonLoaderText.Position = UDim2.fromOffset(14, 39)
+    XenonLoaderText.Size = UDim2.new(1, -28, 0, 25)
+    XenonLoaderText.Font = Enum.Font.Gotham
+    XenonLoaderText.TextColor3 = Color3.fromRGB(170, 170, 175)
+    XenonLoaderText.TextSize = 10
+    XenonLoaderText.TextWrapped = true
+    XenonLoaderText.TextXAlignment = Enum.TextXAlignment.Left
+    XenonLoaderText.Parent = Frame
+
+    local Track = Instance.new("Frame")
+    Track.Position = UDim2.fromOffset(14, 82)
+    Track.Size = UDim2.new(1, -28, 0, 5)
+    Track.BackgroundColor3 = Color3.fromRGB(35, 35, 38)
+    Track.BorderSizePixel = 0
+    Track.Parent = Frame
+
+    local TrackCorner = Instance.new("UICorner")
+    TrackCorner.CornerRadius = UDim.new(1, 0)
+    TrackCorner.Parent = Track
+
+    XenonLoaderBar = Instance.new("Frame")
+    XenonLoaderBar.Size = UDim2.fromScale(0, 1)
+    XenonLoaderBar.BackgroundColor3 = Color3.fromRGB(220, 40, 40)
+    XenonLoaderBar.BorderSizePixel = 0
+    XenonLoaderBar.Parent = Track
+
+    local BarCorner = Instance.new("UICorner")
+    BarCorner.CornerRadius = UDim.new(1, 0)
+    BarCorner.Parent = XenonLoaderBar
+
+    XenonLoaderGui = Gui
+end
+
+local function XenonLoadStage(Index)
+    if XenonLoaderText then
+        XenonLoaderText.Text = XenonLoadMessages[Index] ..
+            "  [" .. tostring(Index) .. "/" .. tostring(#XenonLoadMessages) .. "]"
+    end
+    if XenonLoaderBar then
+        XenonLoaderBar.Size = UDim2.fromScale(Index / #XenonLoadMessages, 1)
+    end
+end
+
+CreateXenonLoader()
+
+-- Give Roblox/executor a frame before each initialization group.  This is
+-- intentionally sequential so the script doesn't construct every object in
+-- one burst.
+for Stage = 1, #XenonLoadMessages do
+    XenonLoadStage(Stage)
+    task.wait(5)
+end
+
+if XenonLoaderGui then
+    XenonLoaderGui:Destroy()
+    XenonLoaderGui = nil
+    XenonLoaderText = nil
+    XenonLoaderBar = nil
+end
+
 --==============================================================
 -- SUPPORTED GAMES
 --==============================================================
@@ -543,7 +662,7 @@ Scroll.BackgroundTransparency = 1
 Scroll.BorderSizePixel = 0
 Scroll.Position = UDim2.new(0, 10, 0, 108)
 Scroll.Size = UDim2.new(1, -20, 1, -118)
-Scroll.CanvasSize = UDim2.fromOffset(0, 1200)
+Scroll.CanvasSize = UDim2.fromOffset(0, 900)
 Scroll.ScrollBarThickness = 3
 Scroll.ScrollBarImageColor3 = RED
 Scroll.ScrollingDirection = Enum.ScrollingDirection.Y
@@ -556,7 +675,7 @@ local function ConfigureTabContainer(Container, Name)
     Container.BorderSizePixel = 0
     Container.Position = Scroll.Position
     Container.Size = Scroll.Size
-    Container.CanvasSize = UDim2.fromOffset(0, 1200)
+    Container.CanvasSize = UDim2.fromOffset(0, 900)
     Container.ScrollBarThickness = 3
     Container.ScrollBarImageColor3 = RED
     Container.ScrollingDirection = Enum.ScrollingDirection.Y
