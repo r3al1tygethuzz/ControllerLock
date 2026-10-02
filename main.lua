@@ -3541,10 +3541,8 @@ Connect(
     UserInputService.InputBegan,
     function(Input, GameProcessed)
 
-        if GameProcessed then
-            return
-        end
-
+        -- Gamepad buttons can be marked as game-processed by Roblox or
+        -- the current game. They must still reach Xenon's lock handler.
         if Input.UserInputType ~=
             Enum.UserInputType.Gamepad1 then
 
