@@ -43,9 +43,9 @@ XenonLoadMessages = {
     "Loading Xenon: finishing connections...",
 }
 
-XenonLoaderGui
-XenonLoaderText
-XenonLoaderBar
+XenonLoaderGui = nil
+XenonLoaderText = nil
+XenonLoaderBar = nil
 
 function CreateXenonLoader()
     local Gui = Instance.new("ScreenGui")
@@ -538,7 +538,7 @@ pcall(function()
     end
 end)
 
-local ScreenGui = Instance.new("ScreenGui")
+ScreenGui = Instance.new("ScreenGui")
 ScreenGui.Name = "Xenon"
 ScreenGui.ResetOnSpawn = false
 ScreenGui.IgnoreGuiInset = false
@@ -553,22 +553,22 @@ ScreenGui.Parent = PlayerGui
 -- COLORS
 --==============================================================
 
-local BLACK = Color3.fromRGB(8, 8, 8)
-local DARK = Color3.fromRGB(14, 14, 14)
-local DARKER = Color3.fromRGB(20, 20, 20)
-local LIGHT_DARK = Color3.fromRGB(30, 30, 30)
+BLACK = Color3.fromRGB(8, 8, 8)
+DARK = Color3.fromRGB(14, 14, 14)
+DARKER = Color3.fromRGB(20, 20, 20)
+LIGHT_DARK = Color3.fromRGB(30, 30, 30)
 
-local WHITE = Color3.fromRGB(245, 245, 245)
-local GRAY = Color3.fromRGB(150, 150, 150)
+WHITE = Color3.fromRGB(245, 245, 245)
+GRAY = Color3.fromRGB(150, 150, 150)
 
-local RED = Color3.fromRGB(220, 40, 40)
-local DARK_RED = Color3.fromRGB(110, 25, 25)
+RED = Color3.fromRGB(220, 40, 40)
+DARK_RED = Color3.fromRGB(110, 25, 25)
 
 --==============================================================
 -- MAIN FRAME
 --==============================================================
 
-local MainFrame = Instance.new("Frame")
+MainFrame = Instance.new("Frame")
 MainFrame.Name = "MainFrame"
 MainFrame.AnchorPoint = Vector2.new(0.5, 0.5)
 MainFrame.Position = UDim2.fromScale(0.5, 0.5)
@@ -580,11 +580,11 @@ MainFrame.Active = true
 MainFrame.ClipsDescendants = false
 MainFrame.Parent = ScreenGui
 
-local MainCorner = Instance.new("UICorner")
+MainCorner = Instance.new("UICorner")
 MainCorner.CornerRadius = UDim.new(0, 14)
 MainCorner.Parent = MainFrame
 
-local MainStroke = Instance.new("UIStroke")
+MainStroke = Instance.new("UIStroke")
 MainStroke.Color = Color3.fromRGB(45, 45, 45)
 MainStroke.Thickness = 1
 MainStroke.Parent = MainFrame
@@ -593,7 +593,7 @@ MainStroke.Parent = MainFrame
 -- TOP BAR
 --==============================================================
 
-local TopBar = Instance.new("Frame")
+TopBar = Instance.new("Frame")
 TopBar.Name = "TopBar"
 TopBar.BackgroundColor3 = DARK
 TopBar.BorderSizePixel = 0
@@ -601,11 +601,11 @@ TopBar.Size = UDim2.new(1, 0, 0, 58)
 TopBar.ZIndex = 11
 TopBar.Parent = MainFrame
 
-local TopCorner = Instance.new("UICorner")
+TopCorner = Instance.new("UICorner")
 TopCorner.CornerRadius = UDim.new(0, 14)
 TopCorner.Parent = TopBar
 
-local TopBottom = Instance.new("Frame")
+TopBottom = Instance.new("Frame")
 TopBottom.BackgroundColor3 = DARK
 TopBottom.BorderSizePixel = 0
 TopBottom.Position = UDim2.new(0, 0, 1, -14)
@@ -617,7 +617,7 @@ TopBottom.Parent = TopBar
 -- TITLE
 --==============================================================
 
-local Title = Instance.new("TextLabel")
+Title = Instance.new("TextLabel")
 Title.BackgroundTransparency = 1
 Title.Position = UDim2.new(0, 18, 0, 7)
 Title.Size = UDim2.new(1, -80, 0, 25)
@@ -629,7 +629,7 @@ Title.TextXAlignment = Enum.TextXAlignment.Left
 Title.ZIndex = 12
 Title.Parent = TopBar
 
-local Subtitle = Instance.new("TextLabel")
+Subtitle = Instance.new("TextLabel")
 Subtitle.BackgroundTransparency = 1
 Subtitle.Position = UDim2.new(0, 19, 0, 32)
 Subtitle.Size = UDim2.new(1, -80, 0, 17)
@@ -645,7 +645,7 @@ Subtitle.Parent = TopBar
 -- CLOSE
 --==============================================================
 
-local CloseButton = Instance.new("TextButton")
+CloseButton = Instance.new("TextButton")
 CloseButton.AnchorPoint = Vector2.new(1, 0.5)
 CloseButton.Position = UDim2.new(1, -12, 0.5, 0)
 CloseButton.Size = UDim2.fromOffset(32, 32)
@@ -659,7 +659,7 @@ CloseButton.AutoButtonColor = false
 CloseButton.ZIndex = 20
 CloseButton.Parent = TopBar
 
-local CloseCorner = Instance.new("UICorner")
+CloseCorner = Instance.new("UICorner")
 CloseCorner.CornerRadius = UDim.new(0, 8)
 CloseCorner.Parent = CloseButton
 
@@ -667,7 +667,7 @@ CloseCorner.Parent = CloseButton
 -- SCROLL
 --==============================================================
 
-local Scroll = Instance.new("ScrollingFrame")
+Scroll = Instance.new("ScrollingFrame")
 Scroll.Name = "TabAim"
 Scroll.BackgroundTransparency = 1
 Scroll.BorderSizePixel = 0
@@ -680,7 +680,7 @@ Scroll.ScrollingDirection = Enum.ScrollingDirection.Y
 Scroll.ZIndex = 11
 Scroll.Parent = MainFrame
 
-local function ConfigureTabContainer(Container, Name)
+function ConfigureTabContainer(Container, Name)
     Container.Name = Name
     Container.BackgroundTransparency = 1
     Container.BorderSizePixel = 0
@@ -709,29 +709,29 @@ local function ConfigureTabContainer(Container, Name)
     return Layout
 end
 
-local SilentTab = Instance.new("ScrollingFrame")
-local VisualsTab = Instance.new("ScrollingFrame")
-local WhitelistTab = Instance.new("ScrollingFrame")
-local SupportedTab = Instance.new("ScrollingFrame")
+SilentTab = Instance.new("ScrollingFrame")
+VisualsTab = Instance.new("ScrollingFrame")
+WhitelistTab = Instance.new("ScrollingFrame")
+SupportedTab = Instance.new("ScrollingFrame")
 
-local AimLayout = Instance.new("UIListLayout")
+AimLayout = Instance.new("UIListLayout")
 AimLayout.Padding = UDim.new(0, 8)
 AimLayout.SortOrder = Enum.SortOrder.LayoutOrder
 AimLayout.Parent = Scroll
 
-local AimPadding = Instance.new("UIPadding")
+AimPadding = Instance.new("UIPadding")
 AimPadding.PaddingLeft = UDim.new(0, 5)
 AimPadding.PaddingRight = UDim.new(0, 5)
 AimPadding.PaddingTop = UDim.new(0, 3)
 AimPadding.PaddingBottom = UDim.new(0, 12)
 AimPadding.Parent = Scroll
 
-local SilentLayout = ConfigureTabContainer(SilentTab, "TabSilent")
-local VisualsLayout = ConfigureTabContainer(VisualsTab, "TabVisuals")
-local WhitelistLayout = ConfigureTabContainer(WhitelistTab, "TabWhitelist")
-local SupportedLayout = ConfigureTabContainer(SupportedTab, "TabSupported")
+SilentLayout = ConfigureTabContainer(SilentTab, "TabSilent")
+VisualsLayout = ConfigureTabContainer(VisualsTab, "TabVisuals")
+WhitelistLayout = ConfigureTabContainer(WhitelistTab, "TabWhitelist")
+SupportedLayout = ConfigureTabContainer(SupportedTab, "TabSupported")
 
-local TabBar = Instance.new("Frame")
+TabBar = Instance.new("Frame")
 TabBar.Name = "TabBar"
 TabBar.BackgroundColor3 = DARK
 TabBar.BorderSizePixel = 0
@@ -740,16 +740,16 @@ TabBar.Size = UDim2.new(1, -20, 0, 38)
 TabBar.ZIndex = 20
 TabBar.Parent = MainFrame
 
-local TabBarCorner = Instance.new("UICorner")
+TabBarCorner = Instance.new("UICorner")
 TabBarCorner.CornerRadius = UDim.new(0, 8)
 TabBarCorner.Parent = TabBar
 
-local TabPadding = Instance.new("UIPadding")
+TabPadding = Instance.new("UIPadding")
 TabPadding.PaddingLeft = UDim.new(0, 4)
 TabPadding.PaddingRight = UDim.new(0, 4)
 TabPadding.Parent = TabBar
 
-local TabLayout = Instance.new("UIListLayout")
+TabLayout = Instance.new("UIListLayout")
 TabLayout.FillDirection = Enum.FillDirection.Horizontal
 TabLayout.HorizontalAlignment = Enum.HorizontalAlignment.Left
 TabLayout.VerticalAlignment = Enum.VerticalAlignment.Center
@@ -757,12 +757,12 @@ TabLayout.SortOrder = Enum.SortOrder.LayoutOrder
 TabLayout.Padding = UDim.new(0, 2)
 TabLayout.Parent = TabBar
 
-local CurrentTabContainer = Scroll
-local CurrentTabName = "AIM"
-local TabButtons = {}
-local TabIndicators = {}
+CurrentTabContainer = Scroll
+CurrentTabName = "AIM"
+TabButtons = {}
+TabIndicators = {}
 
-local function CreateTab(Name, Order)
+function CreateTab(Name, Order)
     local Button = Instance.new("TextButton")
     Button.Name = Name .. "Tab"
     Button.LayoutOrder = Order
@@ -794,17 +794,17 @@ local function CreateTab(Name, Order)
     return Button
 end
 
-local AimTabButton = CreateTab("AIM", 1)
-local SilentTabButton = CreateTab("SILENT", 2)
-local VisualsTabButton = CreateTab("VISUALS", 3)
-local WhitelistTabButton = CreateTab("WHITELIST", 4)
-local SupportedTabButton = CreateTab("SUPPORTED", 5)
+AimTabButton = CreateTab("AIM", 1)
+SilentTabButton = CreateTab("SILENT", 2)
+VisualsTabButton = CreateTab("VISUALS", 3)
+WhitelistTabButton = CreateTab("WHITELIST", 4)
+SupportedTabButton = CreateTab("SUPPORTED", 5)
 
-local function UpdateTabCanvas(Container, Layout)
+function UpdateTabCanvas(Container, Layout)
     Container.CanvasSize = UDim2.fromOffset(0, Layout.AbsoluteContentSize.Y + 25)
 end
 
-local function SetActiveTab(Name)
+function SetActiveTab(Name)
     local Containers = {
         AIM = Scroll,
         SILENT = SilentTab,
@@ -852,9 +852,9 @@ SetActiveTab("AIM")
 -- MOBILE RESPONSIVE
 --==============================================================
 
-local IsMobile = false
+IsMobile = false
 
-local function UpdateResponsiveState()
+function UpdateResponsiveState()
     local Viewport = Camera.ViewportSize
 
     IsMobile = Viewport.X <= 600
@@ -1008,7 +1008,7 @@ end
 -- FLOATING BUTTON
 --==============================================================
 
-local FloatingToggle = Instance.new("TextButton")
+FloatingToggle = Instance.new("TextButton")
 FloatingToggle.Name = "FloatingToggle"
 FloatingToggle.AnchorPoint = Vector2.new(1, 0)
 FloatingToggle.Position =
@@ -1027,11 +1027,11 @@ FloatingToggle.AutoButtonColor = false
 FloatingToggle.ZIndex = 100000
 FloatingToggle.Parent = ScreenGui
 
-local FloatingCorner = Instance.new("UICorner")
+FloatingCorner = Instance.new("UICorner")
 FloatingCorner.CornerRadius = UDim.new(0, 10)
 FloatingCorner.Parent = FloatingToggle
 
-local FloatingStroke = Instance.new("UIStroke")
+FloatingStroke = Instance.new("UIStroke")
 FloatingStroke.Color = RED
 FloatingStroke.Thickness = 1.5
 FloatingStroke.Parent = FloatingToggle
@@ -1040,7 +1040,7 @@ FloatingStroke.Parent = FloatingToggle
 -- SECTION
 --==============================================================
 
-local function CreateSection(Text)
+function CreateSection(Text)
     local Section = Instance.new("TextLabel")
 
     Section.BackgroundTransparency = 1
@@ -1067,7 +1067,7 @@ end
 -- ROW
 --==============================================================
 
-local function CreateRow(Height)
+function CreateRow(Height)
     local Row = Instance.new("Frame")
 
     Row.BackgroundColor3 = DARK
@@ -1095,7 +1095,7 @@ end
 -- LABEL
 --==============================================================
 
-local function CreateLabel(Parent, Text)
+function CreateLabel(Parent, Text)
     local Label = Instance.new("TextLabel")
 
     Label.BackgroundTransparency = 1
@@ -1130,14 +1130,14 @@ XenonWaitStage(4)
 
 CreateSection("CAMERA")
 
-local CameraRow = CreateRow(42)
+CameraRow = CreateRow(42)
 
 CreateLabel(
     CameraRow,
     "Camera Mode"
 )
 
-local CameraButton = Instance.new("TextButton")
+CameraButton = Instance.new("TextButton")
 
 CameraButton.AnchorPoint =
     Vector2.new(1, 0.5)
@@ -1158,11 +1158,11 @@ CameraButton.AutoButtonColor = false
 CameraButton.ZIndex = 13
 CameraButton.Parent = CameraRow
 
-local CameraCorner = Instance.new("UICorner")
+CameraCorner = Instance.new("UICorner")
 CameraCorner.CornerRadius = UDim.new(0, 6)
 CameraCorner.Parent = CameraButton
 
-local CameraOptions = Instance.new("Frame")
+CameraOptions = Instance.new("Frame")
 
 CameraOptions.Visible = false
 CameraOptions.AnchorPoint =
@@ -1179,14 +1179,14 @@ CameraOptions.BorderSizePixel = 0
 CameraOptions.ZIndex = 50
 CameraOptions.Parent = CameraRow
 
-local CameraOptionsCorner = Instance.new("UICorner")
+CameraOptionsCorner = Instance.new("UICorner")
 CameraOptionsCorner.CornerRadius = UDim.new(0, 6)
 CameraOptionsCorner.Parent = CameraOptions
 
-local CameraOptionLayout = Instance.new("UIListLayout")
+CameraOptionLayout = Instance.new("UIListLayout")
 CameraOptionLayout.Parent = CameraOptions
 
-local function CreateCameraOption(Text)
+function CreateCameraOption(Text)
     local Option = Instance.new("TextButton")
 
     Option.Size =
@@ -1226,7 +1226,7 @@ end)
 
 CreateSection("AIM SETTINGS")
 
-local function CreateInputRow(LabelText, DefaultValue)
+function CreateInputRow(LabelText, DefaultValue)
     local Row = CreateRow(44)
 
     CreateLabel(Row, LabelText)
@@ -1265,7 +1265,7 @@ end
 -- 3P OFFSET
 --==============================================================
 
-local OffsetRow, OffsetBox =
+OffsetRow, OffsetBox =
     CreateInputRow(
         "3P Offset",
         Config.AimOffset
@@ -1293,7 +1293,7 @@ end)
 -- SMOOTHING
 --==============================================================
 
-local SmoothRow, SmoothBox =
+SmoothRow, SmoothBox =
     CreateInputRow(
         "Smoothing",
         Config.Smoothing
@@ -1320,7 +1320,7 @@ end)
 -- PREDICTION
 --==============================================================
 
-local PredictionRow, PredictionBox =
+PredictionRow, PredictionBox =
     CreateInputRow(
         "Prediction",
         Config.Prediction
@@ -1347,7 +1347,7 @@ end)
 -- TOGGLE CREATOR
 --==============================================================
 
-local function CreateToggleRow(
+function CreateToggleRow(
     LabelText,
     GetValue,
     SetValue
@@ -1403,7 +1403,7 @@ end
 -- STICKY AIM
 --==============================================================
 
-local StickyRow, StickyButton =
+StickyRow, StickyButton =
     CreateToggleRow(
         "Sticky Aim",
 
@@ -1421,7 +1421,7 @@ local StickyRow, StickyButton =
 -- AIMBOT WHITELIST SKIP
 --==============================================================
 
-local AimWhitelistRow, AimWhitelistButton =
+AimWhitelistRow, AimWhitelistButton =
     CreateToggleRow(
         "Whitelist Skip",
 
@@ -1448,7 +1448,7 @@ local AimWhitelistRow, AimWhitelistButton =
 -- LOCK SAFETY CHECKS
 --==============================================================
 
-local WallCheckRow, WallCheckButton =
+WallCheckRow, WallCheckButton =
     CreateToggleRow(
         "Wall Check",
 
@@ -1468,7 +1468,7 @@ local WallCheckRow, WallCheckButton =
         end
     )
 
-local DownRow, DownButton =
+DownRow, DownButton =
     CreateToggleRow(
         "Down Check",
 
@@ -1489,7 +1489,7 @@ local DownRow, DownButton =
         end
     )
 
-local ManualHealthRow, ManualHealthButton =
+ManualHealthRow, ManualHealthButton =
     CreateToggleRow(
         "Manual Health",
 
@@ -1506,7 +1506,7 @@ local ManualHealthRow, ManualHealthButton =
         end
     )
 
-local HealthRow, HealthBox =
+HealthRow, HealthBox =
     CreateInputRow(
         "Health Threshold",
         Config.HealthThreshold
@@ -1533,14 +1533,14 @@ XenonWaitStage(5)
 
 CreateSection("CONTROLLER")
 
-local LockRow = CreateRow(44)
+LockRow = CreateRow(44)
 
 CreateLabel(
     LockRow,
     "Lock Button"
 )
 
-local LockButtonDisplay = Instance.new("TextLabel")
+LockButtonDisplay = Instance.new("TextLabel")
 
 LockButtonDisplay.AnchorPoint =
     Vector2.new(1, 0.5)
@@ -1566,13 +1566,13 @@ LockButtonDisplay.Font =
 LockButtonDisplay.ZIndex = 13
 LockButtonDisplay.Parent = LockRow
 
-local LockCorner = Instance.new("UICorner")
+LockCorner = Instance.new("UICorner")
 LockCorner.CornerRadius = UDim.new(0, 6)
 LockCorner.Parent = LockButtonDisplay
 
-local RebindRow = CreateRow(44)
+RebindRow = CreateRow(44)
 
-local RebindButton = Instance.new("TextButton")
+RebindButton = Instance.new("TextButton")
 
 RebindButton.Position =
     UDim2.new(0, 8, 0, 7)
@@ -1590,7 +1590,7 @@ RebindButton.AutoButtonColor = false
 RebindButton.ZIndex = 13
 RebindButton.Parent = RebindRow
 
-local RebindCorner = Instance.new("UICorner")
+RebindCorner = Instance.new("UICorner")
 RebindCorner.CornerRadius = UDim.new(0, 7)
 RebindCorner.Parent = RebindButton
 
@@ -1607,11 +1607,11 @@ XenonWaitStage(6)
 --
 -- The existing camera lock is untouched.
 
-local function SilentIsWhitelisted(Player)
+function SilentIsWhitelisted(Player)
     return Player and Whitelist[Player.UserId] == true
 end
 
-local function SilentIsDowned(Player)
+function SilentIsDowned(Player)
     if not Player or not Config.SilentDownCheck then
         return false
     end
@@ -1629,7 +1629,7 @@ local function SilentIsDowned(Player)
     return Object ~= nil and Object.Value == true
 end
 
-local function SilentGetPart(Player)
+function SilentGetPart(Player)
     local Character = Player and Player.Character
     if not Character then
         return nil
@@ -1655,7 +1655,7 @@ local function SilentGetPart(Player)
         or Character:FindFirstChild("HumanoidRootPart")
 end
 
-local function SilentWallCheck(Part)
+function SilentWallCheck(Part)
     if not Config.SilentWallCheck or not Part then
         return true
     end
@@ -1675,7 +1675,7 @@ local function SilentWallCheck(Part)
     return workspace:Raycast(Origin, Direction, Params) == nil
 end
 
-local function SilentGetTarget()
+function SilentGetTarget()
     local BestPlayer = nil
     local BestScore = math.huge
     local Viewport = Camera.ViewportSize
@@ -1709,7 +1709,7 @@ local function SilentGetTarget()
     return BestPlayer
 end
 
-local function SilentResolveTarget()
+function SilentResolveTarget()
     if not Config.SilentEnabled then
         SilentTarget = nil
         return nil
@@ -1732,7 +1732,7 @@ local function SilentResolveTarget()
     return SilentTarget and SilentGetPart(SilentTarget) or nil
 end
 
-local function SilentChancePasses()
+function SilentChancePasses()
     local Chance = math.clamp(
         tonumber(Config.SilentHitChance) or 100,
         0,
@@ -1742,7 +1742,7 @@ local function SilentChancePasses()
     return math.random() * 100 <= Chance
 end
 
-local function SilentReplaceArgs(Args, Part, Method)
+function SilentReplaceArgs(Args, Part, Method)
     if not Part then
         return false
     end
@@ -1833,7 +1833,7 @@ end
 -- Best-effort executor hook. It only runs when the executor exposes
 -- hookmetamethod/newcclosure. If unavailable, the UI still works and
 -- the resolver remains available through _G.XenonSilentResolveTarget.
-local function InstallSilentHook()
+function InstallSilentHook()
     if SilentHookInstalled then
         return
     end
@@ -1920,7 +1920,7 @@ XenonWaitStage(7)
 SetActiveTab("SILENT")
 CreateSection("SILENT AIM")
 
-local SilentEnabledRow, SilentEnabledButton =
+SilentEnabledRow, SilentEnabledButton =
     CreateToggleRow(
         "Enabled",
         function()
@@ -1937,7 +1937,7 @@ local SilentEnabledRow, SilentEnabledButton =
         end
     )
 
-local SilentChanceRow, SilentChanceBox =
+SilentChanceRow, SilentChanceBox =
     CreateInputRow(
         "Hit Chance",
         Config.SilentHitChance
@@ -1956,10 +1956,10 @@ SilentChanceBox.FocusLost:Connect(function()
     end
 end)
 
-local SilentPartRow = CreateRow(44)
+SilentPartRow = CreateRow(44)
 CreateLabel(SilentPartRow, "Target Part")
 
-local SilentPartButton = Instance.new("TextButton")
+SilentPartButton = Instance.new("TextButton")
 SilentPartButton.AnchorPoint = Vector2.new(1, 0.5)
 SilentPartButton.Position = UDim2.new(1, -8, 0.5, 0)
 SilentPartButton.Size = UDim2.new(0.42, 0, 0, 30)
@@ -1973,11 +1973,11 @@ SilentPartButton.AutoButtonColor = false
 SilentPartButton.ZIndex = 13
 SilentPartButton.Parent = SilentPartRow
 
-local SilentPartCorner = Instance.new("UICorner")
+SilentPartCorner = Instance.new("UICorner")
 SilentPartCorner.CornerRadius = UDim.new(0, 6)
 SilentPartCorner.Parent = SilentPartButton
 
-local SilentPartOptions = Instance.new("Frame")
+SilentPartOptions = Instance.new("Frame")
 SilentPartOptions.Visible = false
 SilentPartOptions.AnchorPoint = Vector2.new(1, 0)
 SilentPartOptions.Position = UDim2.new(1, -8, 1, 3)
@@ -1987,11 +1987,11 @@ SilentPartOptions.BorderSizePixel = 0
 SilentPartOptions.ZIndex = 60
 SilentPartOptions.Parent = SilentPartRow
 
-local SilentPartOptionsCorner = Instance.new("UICorner")
+SilentPartOptionsCorner = Instance.new("UICorner")
 SilentPartOptionsCorner.CornerRadius = UDim.new(0, 6)
 SilentPartOptionsCorner.Parent = SilentPartOptions
 
-local SilentPartLayout = Instance.new("UIListLayout")
+SilentPartLayout = Instance.new("UIListLayout")
 SilentPartLayout.Parent = SilentPartOptions
 
 for _, PartName in ipairs({"Head", "Torso", "HumanoidRootPart"}) do
@@ -2020,7 +2020,7 @@ SilentPartButton.Activated:Connect(function()
     SilentPartOptions.Visible = not SilentPartOptions.Visible
 end)
 
-local SilentWallRow, SilentWallButton =
+SilentWallRow, SilentWallButton =
     CreateToggleRow(
         "Wall Check",
         function()
@@ -2032,7 +2032,7 @@ local SilentWallRow, SilentWallButton =
         end
     )
 
-local SilentWhitelistRow, SilentWhitelistButton =
+SilentWhitelistRow, SilentWhitelistButton =
     CreateToggleRow(
         "Whitelist Skip",
         function()
@@ -2047,7 +2047,7 @@ local SilentWhitelistRow, SilentWhitelistButton =
         end
     )
 
-local SilentDownRow, SilentDownButton =
+SilentDownRow, SilentDownButton =
     CreateToggleRow(
         "Down Check",
         function()
@@ -2062,10 +2062,10 @@ local SilentDownRow, SilentDownButton =
         end
     )
 
-local SilentMethodRow = CreateRow(44)
+SilentMethodRow = CreateRow(44)
 CreateLabel(SilentMethodRow, "Method")
 
-local SilentMethodButton = Instance.new("TextButton")
+SilentMethodButton = Instance.new("TextButton")
 SilentMethodButton.AnchorPoint = Vector2.new(1, 0.5)
 SilentMethodButton.Position = UDim2.new(1, -8, 0.5, 0)
 SilentMethodButton.Size = UDim2.new(0.42, 0, 0, 30)
@@ -2079,11 +2079,11 @@ SilentMethodButton.AutoButtonColor = false
 SilentMethodButton.ZIndex = 13
 SilentMethodButton.Parent = SilentMethodRow
 
-local SilentMethodCorner = Instance.new("UICorner")
+SilentMethodCorner = Instance.new("UICorner")
 SilentMethodCorner.CornerRadius = UDim.new(0, 6)
 SilentMethodCorner.Parent = SilentMethodButton
 
-local SilentMethodOptions = Instance.new("Frame")
+SilentMethodOptions = Instance.new("Frame")
 SilentMethodOptions.Visible = false
 SilentMethodOptions.AnchorPoint = Vector2.new(1, 0)
 SilentMethodOptions.Position = UDim2.new(1, -8, 1, 3)
@@ -2093,11 +2093,11 @@ SilentMethodOptions.BorderSizePixel = 0
 SilentMethodOptions.ZIndex = 60
 SilentMethodOptions.Parent = SilentMethodRow
 
-local SilentMethodOptionsCorner = Instance.new("UICorner")
+SilentMethodOptionsCorner = Instance.new("UICorner")
 SilentMethodOptionsCorner.CornerRadius = UDim.new(0, 6)
 SilentMethodOptionsCorner.Parent = SilentMethodOptions
 
-local SilentMethodLayout = Instance.new("UIListLayout")
+SilentMethodLayout = Instance.new("UIListLayout")
 SilentMethodLayout.Parent = SilentMethodOptions
 
 for _, MethodName in ipairs({
@@ -2135,8 +2135,8 @@ end)
 
 CreateSection("SILENT STATUS")
 
-local SilentStatusRow = CreateRow(55)
-local SilentStatusLabel = Instance.new("TextLabel")
+SilentStatusRow = CreateRow(55)
+SilentStatusLabel = Instance.new("TextLabel")
 SilentStatusLabel.BackgroundTransparency = 1
 SilentStatusLabel.Position = UDim2.new(0, 12, 0, 5)
 SilentStatusLabel.Size = UDim2.new(1, -24, 0, 45)
@@ -2179,7 +2179,7 @@ XenonWaitStage(8)
 SetActiveTab("VISUALS")
 CreateSection("VISUALS")
 
-local ESPEnabledRow, ESPEnabledButton =
+ESPEnabledRow, ESPEnabledButton =
     CreateToggleRow(
         "Enabled",
 
@@ -2193,7 +2193,7 @@ local ESPEnabledRow, ESPEnabledButton =
         end
     )
 
-local ESPNameRow, ESPNameButton =
+ESPNameRow, ESPNameButton =
     CreateToggleRow(
         "Show Name",
 
@@ -2207,7 +2207,7 @@ local ESPNameRow, ESPNameButton =
         end
     )
 
-local ESPOutlineRow, ESPOutlineButton =
+ESPOutlineRow, ESPOutlineButton =
     CreateToggleRow(
         "Show Outline",
 
@@ -2221,7 +2221,7 @@ local ESPOutlineRow, ESPOutlineButton =
         end
     )
 
-local ESPWhitelistRow, ESPWhitelistButton =
+ESPWhitelistRow, ESPWhitelistButton =
     CreateToggleRow(
         "Whitelist Check",
 
@@ -2245,9 +2245,9 @@ XenonWaitStage(9)
 SetActiveTab("WHITELIST")
 CreateSection("WHITELIST")
 
-local WhitelistInfoRow = CreateRow(45)
+WhitelistInfoRow = CreateRow(45)
 
-local WhitelistInfo = Instance.new("TextLabel")
+WhitelistInfo = Instance.new("TextLabel")
 
 WhitelistInfo.BackgroundTransparency = 1
 WhitelistInfo.Position =
@@ -2274,7 +2274,7 @@ WhitelistInfo.TextYAlignment =
 WhitelistInfo.ZIndex = 13
 WhitelistInfo.Parent = WhitelistInfoRow
 
-local WhitelistContainer = Instance.new("Frame")
+WhitelistContainer = Instance.new("Frame")
 
 WhitelistContainer.Name =
     "WhitelistContainer"
@@ -2286,7 +2286,7 @@ WhitelistContainer.Size =
 WhitelistContainer.ZIndex = 12
 WhitelistContainer.Parent = CurrentTabContainer
 
-local WhitelistLayout = Instance.new("UIListLayout")
+WhitelistLayout = Instance.new("UIListLayout")
 WhitelistLayout.Padding =
     UDim.new(0, 6)
 
@@ -2303,7 +2303,7 @@ WhitelistLayout.Parent =
 SetActiveTab("SUPPORTED")
 CreateSection("SUPPORTED GAMES")
 
-local function CreateSupportedGameCard(PlaceId, GameConfig)
+function CreateSupportedGameCard(PlaceId, GameConfig)
     local Name = GetGameInfo(PlaceId)
 
     local Row = CreateRow(72)
@@ -2350,8 +2350,8 @@ local function CreateSupportedGameCard(PlaceId, GameConfig)
     return Row
 end
 
-local CurrentGameRow = CreateRow(54)
-local CurrentGameLabel = Instance.new("TextLabel")
+CurrentGameRow = CreateRow(54)
+CurrentGameLabel = Instance.new("TextLabel")
 CurrentGameLabel.BackgroundTransparency = 1
 CurrentGameLabel.Position = UDim2.new(0, 12, 0, 6)
 CurrentGameLabel.Size = UDim2.new(1, -24, 0, 20)
@@ -2364,7 +2364,7 @@ CurrentGameLabel.TextTruncate = Enum.TextTruncate.AtEnd
 CurrentGameLabel.ZIndex = 13
 CurrentGameLabel.Parent = CurrentGameRow
 
-local CurrentStatusLabel = Instance.new("TextLabel")
+CurrentStatusLabel = Instance.new("TextLabel")
 CurrentStatusLabel.BackgroundTransparency = 1
 CurrentStatusLabel.Position = UDim2.new(0, 12, 0, 27)
 CurrentStatusLabel.Size = UDim2.new(1, -24, 0, 18)
@@ -2390,9 +2390,9 @@ XenonWaitStage(10)
 SetActiveTab("AIM")
 CreateSection("STATUS")
 
-local StatusRow = CreateRow(55)
+StatusRow = CreateRow(55)
 
-local StatusLabel = Instance.new("TextLabel")
+StatusLabel = Instance.new("TextLabel")
 
 StatusLabel.BackgroundTransparency = 1
 StatusLabel.Position =
@@ -2413,7 +2413,7 @@ StatusLabel.TextXAlignment =
 StatusLabel.ZIndex = 13
 StatusLabel.Parent = StatusRow
 
-local TargetLabel = Instance.new("TextLabel")
+TargetLabel = Instance.new("TextLabel")
 
 TargetLabel.BackgroundTransparency = 1
 TargetLabel.Position =
@@ -2440,7 +2440,7 @@ TargetLabel.Parent = StatusRow
 -- WHITELIST UI
 --==============================================================
 
-local function ClearWhitelistUI()
+function ClearWhitelistUI()
     for _, Child in ipairs(
         WhitelistContainer:GetChildren()
     ) do
@@ -2450,7 +2450,7 @@ local function ClearWhitelistUI()
     end
 end
 
-local function CreateWhitelistEntry(Player)
+function CreateWhitelistEntry(Player)
     local Entry = Instance.new("TextButton")
 
     Entry.Name =
@@ -2527,7 +2527,7 @@ local function CreateWhitelistEntry(Player)
     return Entry
 end
 
-local function RefreshWhitelistUI()
+function RefreshWhitelistUI()
     ClearWhitelistUI()
 
     local PlayerList = Players:GetPlayers()
@@ -2561,7 +2561,7 @@ end
 -- ESP
 --==============================================================
 
-local function DestroyESP(Player)
+function DestroyESP(Player)
     local Data = ESPObjects[Player]
 
     if not Data then
@@ -2583,7 +2583,7 @@ local function DestroyESP(Player)
     ESPObjects[Player] = nil
 end
 
-local function CreateESP(Player)
+function CreateESP(Player)
     if Player == LocalPlayer then
         return
     end
@@ -2697,7 +2697,7 @@ local function CreateESP(Player)
     ESPObjects[Player] = Data
 end
 
-local function ShouldESP(Player)
+function ShouldESP(Player)
     if Player == LocalPlayer then
         return false
     end
@@ -2715,7 +2715,7 @@ local function ShouldESP(Player)
     return true
 end
 
-local function UpdateESPPlayer(Player)
+function UpdateESPPlayer(Player)
     if Player == LocalPlayer then
         return
     end
@@ -2727,7 +2727,7 @@ local function UpdateESPPlayer(Player)
     end
 end
 
-local function UpdateAllESP()
+function UpdateAllESP()
     for _, Player in ipairs(
         Players:GetPlayers()
     ) do
@@ -2811,7 +2811,7 @@ end
 -- TARGET DATA
 --==============================================================
 
-local function GetCharacterData(Player)
+function GetCharacterData(Player)
     if not Player then
         return nil
     end
@@ -2854,7 +2854,7 @@ end
 -- LOCAL ROOT
 --==============================================================
 
-local function GetLocalRoot()
+function GetLocalRoot()
     local Character =
         LocalPlayer.Character
 
@@ -2875,7 +2875,7 @@ end
 -- Matching is case-insensitive for Backpack/BackPack, Stats/stats,
 -- and Downed/DOWNED.
 
-local function FindChildCaseInsensitive(Parent, WantedName)
+function FindChildCaseInsensitive(Parent, WantedName)
     if not Parent then
         return nil
     end
@@ -2891,7 +2891,7 @@ local function FindChildCaseInsensitive(Parent, WantedName)
     return nil
 end
 
-local function GetPathValueCaseInsensitive(Root, Path)
+function GetPathValueCaseInsensitive(Root, Path)
     local Current = Root
 
     for _, Name in ipairs(Path or {}) do
@@ -2904,7 +2904,7 @@ local function GetPathValueCaseInsensitive(Root, Path)
     return Current
 end
 
-local function IsTargetDown(Player)
+function IsTargetDown(Player)
     if not Player or not ActiveGameConfig.DownCheckPath then
         return false
     end
@@ -2926,7 +2926,7 @@ local function IsTargetDown(Player)
     return Success and Value == true
 end
 
-local function IsTargetBelowHealth(Player)
+function IsTargetBelowHealth(Player)
     if not Player then
         return false
     end
@@ -2944,7 +2944,7 @@ local function IsTargetBelowHealth(Player)
     return Humanoid.Health <= Config.HealthThreshold
 end
 
-local function IsHeadVisible(Player)
+function IsHeadVisible(Player)
     if not Player then
         return false
     end
@@ -2988,7 +2988,7 @@ local function IsHeadVisible(Player)
     return Result.Instance:IsDescendantOf(Character)
 end
 
-local function IsTargetLockable(Player)
+function IsTargetLockable(Player)
     if not Player then
         return false
     end
@@ -3029,7 +3029,7 @@ _G.XenonControllerDotNames = {
     Cursor = true,
 }
 
-local function GetControllerDotPosition()
+function GetControllerDotPosition()
     local CurrentCamera = workspace.CurrentCamera
 
     if not CurrentCamera then
@@ -3082,7 +3082,7 @@ local function GetControllerDotPosition()
     return ScreenCenter
 end
 
-local function GetTargetScreenPosition(Player)
+function GetTargetScreenPosition(Player)
     local CurrentCamera = workspace.CurrentCamera
 
     if not CurrentCamera then
@@ -3108,7 +3108,7 @@ local function GetTargetScreenPosition(Player)
     return CurrentCamera:WorldToViewportPoint(Position)
 end
 
-local function GetClosestToControllerDot()
+function GetClosestToControllerDot()
     local CurrentCamera = workspace.CurrentCamera
 
     if not CurrentCamera then
@@ -3169,7 +3169,7 @@ end
 -- PHYSICAL DISTANCE TARGET
 --==============================================================
 
-local function GetClosestByDistance()
+function GetClosestByDistance()
     local LocalRoot =
         GetLocalRoot()
 
@@ -3229,7 +3229,7 @@ end
 -- FIND TARGET
 --==============================================================
 
-local function FindTarget()
+function FindTarget()
     if Config.StickyAim then
         return GetClosestToControllerDot()
     end
@@ -3241,7 +3241,7 @@ end
 -- PREDICTION
 --==============================================================
 
-local function GetPredictedPosition(
+function GetPredictedPosition(
     Position,
     Velocity
 )
@@ -3253,7 +3253,7 @@ end
 -- THIRD PERSON ADAPTIVE OFFSET
 --==============================================================
 
-local function GetAdaptiveOffset(TargetRoot)
+function GetAdaptiveOffset(TargetRoot)
     if not TargetRoot then
         return Config.AimOffset
     end
@@ -3305,7 +3305,7 @@ end
 -- AIM POSITION
 --==============================================================
 
-local function GetAimPosition(Player)
+function GetAimPosition(Player)
     local Character,
         Humanoid,
         Root =
@@ -3394,7 +3394,7 @@ end
 -- STATUS
 --==============================================================
 
-local function UpdateStatus()
+function UpdateStatus()
     if Locked
         and LockedTarget then
 
@@ -3423,7 +3423,7 @@ end
 -- UNLOCK
 --==============================================================
 
-local function Unlock()
+function Unlock()
     Locked = false
     LockedTarget = nil
 
@@ -3434,7 +3434,7 @@ end
 -- LOCK
 --==============================================================
 
-local function Lock()
+function Lock()
     if Locked then
         Unlock()
         return
@@ -3471,7 +3471,7 @@ end
 -- TARGET VALIDATION
 --==============================================================
 
-local function IsTargetValid(Player)
+function IsTargetValid(Player)
     if not Player then
         return false
     end
@@ -3744,9 +3744,9 @@ RunService:BindToRenderStep(
 -- DRAGGING
 --==============================================================
 
-local Dragging = false
-local DragStart
-local StartPosition
+Dragging = false
+DragStart = nil
+StartPosition = nil
 
 TopBar.InputBegan:Connect(function(Input)
 
@@ -3892,7 +3892,7 @@ end)
 --==============================================================
 -- Use Global ZIndex and give every descendant a layer above its parent.
 -- This prevents the black MainFrame from covering its own controls.
-local function RepairXenonZIndex()
+function RepairXenonZIndex()
     MainFrame.ZIndex = 1
 
     for _, Object in ipairs(MainFrame:GetDescendants()) do
