@@ -122,20 +122,17 @@ end
 
 CreateXenonLoader()
 
--- Give Roblox/executor a frame before each initialization group.  This is
--- intentionally sequential so the script doesn't construct every object in
--- one burst.
-for Stage = 1, #XenonLoadMessages do
-    XenonLoadStage(Stage)
+-- IMPORTANT: the old version waited the full 30 seconds and then built
+-- almost the entire script in one burst. That made the loading screen feel
+-- slow while the actual UI/ESP/Silent systems still caused a spike.
+-- This version pauses BETWEEN real initialization groups instead.
+local function XenonWaitStage(Index)
+    XenonLoadStage(Index)
     task.wait(5)
 end
 
-if XenonLoaderGui then
-    XenonLoaderGui:Destroy()
-    XenonLoaderGui = nil
-    XenonLoaderText = nil
-    XenonLoaderBar = nil
-end
+-- Stage 1: services / supported-game setup
+XenonWaitStage(1)
 
 --==============================================================
 -- SUPPORTED GAMES
@@ -196,6 +193,9 @@ local function GetGameInfo(PlaceId)
 end
 
 local CurrentGameName = GetGameInfo(CurrentPlaceId)
+
+-- Stage 2: supported game + settings/configuration
+XenonWaitStage(2)
 
 --==============================================================
 -- DUPLICATE EXECUTION CLEANUP
@@ -506,6 +506,9 @@ local function Connect(Signal, Callback)
 
     return Connection
 end
+
+-- Stage 3: base GUI
+XenonWaitStage(3)
 
 --==============================================================
 -- GUI
@@ -1578,6 +1581,9 @@ RebindCorner.CornerRadius = UDim.new(0, 7)
 RebindCorner.Parent = RebindButton
 
 
+-- Stage 4: controller aim / camera lock
+XenonWaitStage(4)
+
 --==============================================================
 -- SILENT AIM CORE
 --==============================================================
@@ -1889,6 +1895,9 @@ _G.XenonSilentResolveTarget = SilentResolveTarget
 
 
 
+-- Stage 5: Silent Aim controls
+XenonWaitStage(5)
+
 --==============================================================
 -- SILENT
 --==============================================================
@@ -2144,6 +2153,9 @@ task.spawn(function()
     end
 end)
 
+
+-- Stage 6: visuals / whitelist / ESP / final connections
+XenonWaitStage(6)
 
 --==============================================================
 -- VISUALS
@@ -2982,7 +2994,7 @@ end
 -- CONTROLLER DOT TARGET
 --==============================================================
 
-local ControllerDotNames = {
+_G.XenonControllerDotNames = {
     ControllerDot = true,
     ControllerCursor = true,
     ControllerReticle = true,
@@ -3014,7 +3026,7 @@ local function GetControllerDotPosition()
     for _, Object in ipairs(PlayerGui:GetDescendants()) do
         if Object:IsA("GuiObject")
             and Object.Visible
-            and ControllerDotNames[Object.Name] then
+            and _G.XenonControllerDotNames[Object.Name] then
 
             local Size = Object.AbsoluteSize
 
@@ -3473,7 +3485,7 @@ end
 -- CONTROLLER BUTTONS
 --==============================================================
 
-local SupportedButtons = {
+_G.XenonSupportedButtons = {
     [Enum.KeyCode.ButtonA] = true,
     [Enum.KeyCode.ButtonB] = true,
     [Enum.KeyCode.ButtonX] = true,
@@ -3521,7 +3533,7 @@ Connect(
         -- REBIND
         if WaitingForButton then
 
-            if SupportedButtons[
+            if _G.XenonSupportedButtons[
                 Input.KeyCode
             ] then
 
@@ -3886,6 +3898,15 @@ RepairXenonZIndex()
 -- CLEANUP
 --==============================================================
 
+-- Final stage is complete. Remove only the loading overlay now that all
+-- systems have been constructed and connected.
+if XenonLoaderGui then
+    XenonLoaderGui:Destroy()
+    XenonLoaderGui = nil
+    XenonLoaderText = nil
+    XenonLoaderBar = nil
+end
+
 _G.XenonCleanup = function()
     SaveSettings()
 
@@ -3934,3 +3955,7 @@ print("======================================")
 
 -- Silent cleanup
 _G.XenonSilentResolveTarget = nil
+
+
+pcall(function() _G.XenonControllerDotNames = nil end)
+pcall(function() _G.XenonSupportedButtons = nil end)
