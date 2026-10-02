@@ -7,39 +7,47 @@
 --==============================================================
 -- SERVICES
 --==============================================================
+-- REGISTER-SAFE STARTUP: the first 45 top-level declarations below are
+-- intentionally globals. Luau counts locals toward the 200-register limit;
+-- keeping the large UI script under that limit prevents "OUT OF LOCAL
+-- REGISTERS" errors before ControllerButtonNames/other tables are allocated.
 
-local Players = game:GetService("Players")
-local UserInputService = game:GetService("UserInputService")
-local RunService = game:GetService("RunService")
-local HttpService = game:GetService("HttpService")
-local MarketplaceService = game:GetService("MarketplaceService")
+Players = game:GetService("Players")
+UserInputService = game:GetService("UserInputService")
+RunService = game:GetService("RunService")
+HttpService = game:GetService("HttpService")
+MarketplaceService = game:GetService("MarketplaceService")
 
-local LocalPlayer = Players.LocalPlayer
-local PlayerGui = LocalPlayer:WaitForChild("PlayerGui")
-local Camera = workspace.CurrentCamera
+LocalPlayer = Players.LocalPlayer
+PlayerGui = LocalPlayer:WaitForChild("PlayerGui")
+Camera = workspace.CurrentCamera
 
 
 --==============================================================
 -- XENON STAGED LOADER
 --==============================================================
--- Six stages, five seconds each (~30 seconds total).  Each stage
+-- Ten stages, three seconds each (~30 seconds total). Each stage
 -- updates the small loader instead of creating the whole UI at once.
 -- The loader also prevents duplicate executions from stacking.
 
-local XenonLoadMessages = {
-    "Loading Xenon... Preparing services",
-    "Loading supported-game configuration",
-    "Loading controller and camera systems",
-    "Loading whitelist and ESP systems",
-    "Loading Aim and Silent settings",
-    "Finishing Xenon UI and connections",
+XenonLoadMessages = {
+    "Loading Xenon: preparing services...",
+    "Loading Xenon: checking supported game...",
+    "Loading Xenon: building the main UI...",
+    "Loading Xenon: loading aim settings...",
+    "Loading Xenon: loading controller lock...",
+    "Loading Xenon: preparing Silent Aim...",
+    "Loading Xenon: building Silent settings...",
+    "Loading Xenon: loading Visuals and ESP...",
+    "Loading Xenon: loading Whitelist and Supported tabs...",
+    "Loading Xenon: finishing connections...",
 }
 
-local XenonLoaderGui
-local XenonLoaderText
-local XenonLoaderBar
+XenonLoaderGui
+XenonLoaderText
+XenonLoaderBar
 
-local function CreateXenonLoader()
+function CreateXenonLoader()
     local Gui = Instance.new("ScreenGui")
     Gui.Name = "XenonLoading"
     Gui.ResetOnSpawn = false
@@ -110,7 +118,7 @@ local function CreateXenonLoader()
     XenonLoaderGui = Gui
 end
 
-local function XenonLoadStage(Index)
+function XenonLoadStage(Index)
     if XenonLoaderText then
         XenonLoaderText.Text = XenonLoadMessages[Index] ..
             "  [" .. tostring(Index) .. "/" .. tostring(#XenonLoadMessages) .. "]"
@@ -126,9 +134,9 @@ CreateXenonLoader()
 -- almost the entire script in one burst. That made the loading screen feel
 -- slow while the actual UI/ESP/Silent systems still caused a spike.
 -- This version pauses BETWEEN real initialization groups instead.
-local function XenonWaitStage(Index)
+function XenonWaitStage(Index)
     XenonLoadStage(Index)
-    task.wait(5)
+    task.wait(3)
 end
 
 -- Stage 1: services / supported-game setup
@@ -144,7 +152,7 @@ XenonWaitStage(1)
 -- support the automatic Downed check. Future supported games can leave
 -- it nil and use the manual health check instead.
 
-local SupportedGames = {
+SupportedGames = {
     [13388465281] = {
         DownCheckPath = {"Backpack", "Stats", "Downed"},
         DownCheckDefault = true,
@@ -160,11 +168,11 @@ local SupportedGames = {
     },
 }
 
-local CurrentPlaceId = tonumber(game.PlaceId) or 0
-local CurrentGameId = tonumber(game.GameId) or 0
+CurrentPlaceId = tonumber(game.PlaceId) or 0
+CurrentGameId = tonumber(game.GameId) or 0
 
 -- Accept either a PlaceId or a Universe/GameId.
-local ActiveGameConfig =
+ActiveGameConfig =
     SupportedGames[CurrentPlaceId]
     or SupportedGames[CurrentGameId]
 
@@ -180,7 +188,7 @@ if not ActiveGameConfig then
     return
 end
 
-local function GetGameInfo(PlaceId)
+function GetGameInfo(PlaceId)
     local Success, Info = pcall(function()
         return MarketplaceService:GetProductInfo(PlaceId)
     end)
@@ -192,7 +200,7 @@ local function GetGameInfo(PlaceId)
     return "Place " .. tostring(PlaceId)
 end
 
-local CurrentGameName = GetGameInfo(CurrentPlaceId)
+CurrentGameName = GetGameInfo(CurrentPlaceId)
 
 -- Stage 2: supported game + settings/configuration
 XenonWaitStage(2)
@@ -211,7 +219,7 @@ pcall(function()
     RunService:UnbindFromRenderStep("XenonCameraLock")
 end)
 
-local OldGui = PlayerGui:FindFirstChild("Xenon")
+OldGui = PlayerGui:FindFirstChild("Xenon")
 
 if OldGui then
     OldGui:Destroy()
@@ -221,7 +229,7 @@ end
 -- CONFIG
 --==============================================================
 
-local Config = {
+Config = {
     LockButton = Enum.KeyCode.ButtonY,
 
     CameraMode = "Third Person",
@@ -281,10 +289,10 @@ local Config = {
 -- Each Roblox account gets its own settings file. Values are loaded
 -- before the UI is created, so the controls open on the saved values.
 
-local SettingsFileName =
+SettingsFileName =
     "XenonSettings_" .. tostring(LocalPlayer.UserId) .. ".json"
 
-local function SerializeConfig()
+function SerializeConfig()
     local Data = {}
 
     for Key, Value in pairs(Config) do
@@ -304,7 +312,7 @@ local function SerializeConfig()
     return Data
 end
 
-local function SaveSettings()
+function SaveSettings()
     if type(writefile) ~= "function" then
         return
     end
@@ -317,7 +325,7 @@ local function SaveSettings()
     end)
 end
 
-local function LoadSettings()
+function LoadSettings()
     if type(isfile) ~= "function"
         or type(readfile) ~= "function" then
         return
@@ -374,30 +382,30 @@ end
 -- STATE
 --==============================================================
 
-local Locked = false
-local LockedTarget = nil
+Locked = false
+LockedTarget = nil
 
-local WaitingForButton = false
-local MainVisible = true
+WaitingForButton = false
+MainVisible = true
 
-local Connections = {}
+Connections = {}
 
-local ESPObjects = {}
+ESPObjects = {}
 
-local Whitelist = {}
+Whitelist = {}
 
-local SilentTarget = nil
-local SilentHookInstalled = false
-local SilentOldNamecall = nil
-local SilentOldIndex = nil
+SilentTarget = nil
+SilentHookInstalled = false
+SilentOldNamecall = nil
+SilentOldIndex = nil
 
 --==============================================================
 -- WHITELIST STORAGE
 --==============================================================
 
-local WhitelistFileName = "XenonWhitelist.json"
+WhitelistFileName = "XenonWhitelist.json"
 
-local function LoadWhitelist()
+function LoadWhitelist()
     table.clear(Whitelist)
 
     if type(isfile) ~= "function" then
@@ -437,7 +445,7 @@ local function LoadWhitelist()
     end
 end
 
-local function SaveWhitelist()
+function SaveWhitelist()
     if type(writefile) ~= "function" then
         return
     end
@@ -460,7 +468,7 @@ end
 
 LoadWhitelist()
 
-local function IsWhitelisted(Player)
+function IsWhitelisted(Player)
     if not Player then
         return false
     end
@@ -468,7 +476,7 @@ local function IsWhitelisted(Player)
     return Whitelist[Player.UserId] == true
 end
 
-local function SetWhitelist(Player, State)
+function SetWhitelist(Player, State)
     if not Player then
         return
     end
@@ -486,7 +494,7 @@ end
 -- CONNECTION HELPERS
 --==============================================================
 
-local function DisconnectAll()
+function DisconnectAll()
     for _, Connection in ipairs(Connections) do
         pcall(function()
             Connection:Disconnect()
@@ -496,7 +504,7 @@ local function DisconnectAll()
     table.clear(Connections)
 end
 
-local function Connect(Signal, Callback)
+function Connect(Signal, Callback)
     local Connection = Signal:Connect(Callback)
 
     table.insert(
@@ -1114,6 +1122,9 @@ local function CreateLabel(Parent, Text)
 end
 
 --==============================================================
+-- Stage 4: aim settings
+XenonWaitStage(4)
+
 -- CAMERA SECTION
 --==============================================================
 
@@ -1514,6 +1525,9 @@ HealthBox.FocusLost:Connect(function()
     end
 end)
 
+-- Stage 5: controller lock
+XenonWaitStage(5)
+
 -- CONTROLLER
 --==============================================================
 
@@ -1581,10 +1595,10 @@ RebindCorner.CornerRadius = UDim.new(0, 7)
 RebindCorner.Parent = RebindButton
 
 
--- Stage 4: controller aim / camera lock
-XenonWaitStage(4)
-
 --==============================================================
+-- Stage 6: Silent Aim core
+XenonWaitStage(6)
+
 -- SILENT AIM CORE
 --==============================================================
 -- Silent aim is intentionally best-effort because Roblox games use
@@ -1866,12 +1880,13 @@ local function InstallSilentHook()
                     )
 
                 if DidReplace then
+                    local ArgCount = math.min(Args.n or 0, 20)
                     return OldNamecall(
                         Self,
                         table.unpack(
                             Args,
                             1,
-                            Args.n
+                            ArgCount
                         )
                     )
                 end
@@ -1895,8 +1910,8 @@ _G.XenonSilentResolveTarget = SilentResolveTarget
 
 
 
--- Stage 5: Silent Aim controls
-XenonWaitStage(5)
+-- Stage 7: Silent Aim controls
+XenonWaitStage(7)
 
 --==============================================================
 -- SILENT
@@ -2154,8 +2169,8 @@ task.spawn(function()
 end)
 
 
--- Stage 6: visuals / whitelist / ESP / final connections
-XenonWaitStage(6)
+-- Stage 8: visuals / ESP
+XenonWaitStage(8)
 
 --==============================================================
 -- VISUALS
@@ -2221,6 +2236,9 @@ local ESPWhitelistRow, ESPWhitelistButton =
     )
 
 --==============================================================
+-- Stage 9: whitelist and supported tabs
+XenonWaitStage(9)
+
 -- WHITELIST
 --==============================================================
 
@@ -2363,6 +2381,9 @@ for PlaceId, GameConfig in pairs(SupportedGames) do
 end
 
 --==============================================================
+-- Stage 10: final connections
+XenonWaitStage(10)
+
 -- STATUS
 --==============================================================
 
