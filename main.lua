@@ -38,7 +38,39 @@ local SupportedGames = {
 }
 
 local CurrentPlaceId = tonumber(game.PlaceId) or 0
-local ActiveGameConfig = SupportedGames[CurrentPlaceId]
+local CurrentGameId = tonumber(game.GameId) or 0
+
+-- Normalize the support table so numeric keys AND string keys work.
+-- This also accepts either a Roblox PlaceId or Universe/GameId.
+local ActiveGameConfig
+local ActiveSupportId
+
+for SupportId, GameConfig in pairs(SupportedGames) do
+    local Id = tonumber(SupportId)
+
+    if Id then
+        -- Normal entry: [PlaceId] = {...}
+        if Id == CurrentPlaceId or Id == CurrentGameId then
+            ActiveGameConfig = GameConfig
+            ActiveSupportId = Id
+            break
+        end
+    end
+
+    -- Optional explicit IDs for future entries:
+    -- { PlaceId = 123, GameId = 456, ... }
+    if type(GameConfig) == "table" then
+        local ConfigPlaceId = tonumber(GameConfig.PlaceId)
+        local ConfigGameId = tonumber(GameConfig.GameId)
+
+        if (ConfigPlaceId and ConfigPlaceId == CurrentPlaceId)
+            or (ConfigGameId and ConfigGameId == CurrentGameId) then
+            ActiveGameConfig = GameConfig
+            ActiveSupportId = Id or ConfigPlaceId or ConfigGameId
+            break
+        end
+    end
+end
 
 if not ActiveGameConfig then
     pcall(function()
